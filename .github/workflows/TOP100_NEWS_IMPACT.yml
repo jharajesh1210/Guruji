@@ -4,7 +4,7 @@ name: TOP100 NEWS IMPACT PAPER
 on:
   workflow_dispatch:
   schedule:
-    - cron: "4,19,34,49 * * * *"
+    - cron: "7,22,37,52 * * * *"
 
 permissions:
   contents: write
@@ -23,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
           persist-credentials: true
 
       - name: Setup Python
@@ -35,7 +36,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install requests pandas numpy
 
-      - name: Verify Python files
+      - name: Verify scanner files
         run: |
           test -f TOP100_CRIPTO_AMC_POC_NEWS_IMPACT.py
           test -f NEWS_IMPACT_ENGINE.py
@@ -53,41 +54,77 @@ jobs:
 
       - name: Save paper trading files
         if: success()
+        shell: bash
         run: |
+          set -euo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          echo "Checking News Impact paper files..."
+          PREFIX="TOP100_CRIPTO_AMC_POC_NEWS_IMPACT"
+          STATE="${PREFIX}_state.json"
 
-          if [ ! -f TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json ]; then
-            echo "ERROR: News Impact state file missing"
+          if [ ! -f "$STATE" ]; then
+            echo "ERROR: State file not created"
             exit 1
           fi
 
-          git add -f TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json
+          mkdir -p /tmp/top100-news-save
 
           for file in \
-            TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_trades.csv \
-            TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_signals.csv \
-            TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_universe.csv \
-            TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_news_skips.csv
+            "${PREFIX}_state.json" \
+            "${PREFIX}_trades.csv" \
+            "${PREFIX}_signals.csv" \
+            "${PREFIX}_universe.csv" \
+            "${PREFIX}_news_skips.csv"
           do
             if [ -f "$file" ]; then
-              git add -f "$file"
+              cp "$file" /tmp/top100-news-save/
             fi
           done
 
-          if git diff --cached --quiet; then
-            echo "NO CHANGES TO COMMIT"
-          else
+          for attempt in 1 2 3 4 5; do
+            echo "SAVE ATTEMPT: $attempt"
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            cp /tmp/top100-news-save/* .
+
+            for file in \
+              "${PREFIX}_state.json" \
+              "${PREFIX}_trades.csv" \
+              "${PREFIX}_signals.csv" \
+              "${PREFIX}_universe.csv" \
+              "${PREFIX}_news_skips.csv"
+            do
+              if [ -f "$file" ]; then
+                git add -f "$file"
+              fi
+            done
+
+            if git diff --cached --quiet; then
+              echo "NO CHANGES TO SAVE"
+              exit 0
+            fi
+
             git commit -m "Update TOP100 News Impact paper data"
-            git push origin HEAD:main
-            echo "PAPER FILES PUSHED SUCCESSFULLY"
-          fi
+
+            if git push origin HEAD:main; then
+              echo "PAPER FILES SAVED SUCCESSFULLY"
+              exit 0
+            fi
+
+            echo "Push conflict. Retrying..."
+            sleep 3
+          done
+
+          echo "ERROR: Could not save paper files"
+          exit 1
 
       - name: Verify state file
         if: success()
         run: |
           test -f TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json
-          echo "NEWS IMPACT STATE FILE EXISTS"
+          echo "STATE FILE EXISTS"
           ls -lh TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json
