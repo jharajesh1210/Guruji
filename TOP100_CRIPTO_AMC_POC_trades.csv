@@ -1,0 +1,2 @@
+trade_id,pair,direction,rr,entry_time,exit_time,entry,stop,target,exit,result,net_return_pct_per_leg
+B-ONDO_USDT-2026-10-23T21:00:00+00:00-TRAIL-RR4,B-ONDO_USDT,LONG,4,2026-10-23T21:00:00+00:00,2026-10-23T22:20:00+00:00,0.42688536,0.4243,0.4372267999999999,0.42421514000000005,SL,-0.7255
