@@ -4,13 +4,13 @@ name: TOP100 ORIGINAL PAPER
 on:
   workflow_dispatch:
   schedule:
-    - cron: "3,18,33,48 * * * *"
+    - cron: "4,19,34,49 * * * *"
 
 permissions:
   contents: write
 
 concurrency:
-  group: guruji-top100-original
+  group: guruji-paper-scanners
   cancel-in-progress: false
 
 jobs:
@@ -22,6 +22,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: main
+          fetch-depth: 0
           persist-credentials: true
 
       - name: Setup Python
@@ -39,42 +41,84 @@ jobs:
           test -f TOP100_CRIPTO_AMC_POC.py
           python -m py_compile TOP100_CRIPTO_AMC_POC.py
 
-      - name: Run TOP100 Original scanner
+      - name: Run TOP100 scanner
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python -u TOP100_CRIPTO_AMC_POC.py
 
-      - name: Save paper trading history
+      - name: Save paper trading files
         if: success()
+        shell: bash
         run: |
+          set -euo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          echo "Checking paper trading files..."
+          PREFIX="TOP100_CRIPTO_AMC_POC"
+          STATE="${PREFIX}_state.json"
 
-          ls -la TOP100_CRIPTO_AMC_POC* || true
-
-          git add -A -- \
-            ':(glob)TOP100_CRIPTO_AMC_POC_*.json' \
-            ':(glob)TOP100_CRIPTO_AMC_POC_*.csv'
-
-          if git diff --cached --quiet; then
-            echo "No new paper files to save"
-          else
-            git commit -m "Update TOP100 Original paper trading data"
-            git push
-            echo "PAPER HISTORY SAVED"
-          fi
-
-      - name: Verify state
-        if: success()
-        run: |
-          if [ -f TOP100_CRIPTO_AMC_POC_state.json ]; then
-            echo "STATE FILE EXISTS"
-            ls -lh TOP100_CRIPTO_AMC_POC_state.json
-          else
-            echo "WARNING: State file not found"
+          if [ ! -f "$STATE" ]; then
+            echo "ERROR: State file not created"
             exit 1
           fi
+
+          mkdir -p /tmp/top100-save
+
+          for file in \
+            "${PREFIX}_state.json" \
+            "${PREFIX}_trades.csv" \
+            "${PREFIX}_signals.csv" \
+            "${PREFIX}_universe.csv"
+          do
+            if [ -f "$file" ]; then
+              cp "$file" /tmp/top100-save/
+            fi
+          done
+
+          for attempt in 1 2 3 4 5; do
+            echo "SAVE ATTEMPT: $attempt"
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            cp /tmp/top100-save/* .
+
+            for file in \
+              "${PREFIX}_state.json" \
+              "${PREFIX}_trades.csv" \
+              "${PREFIX}_signals.csv" \
+              "${PREFIX}_universe.csv"
+            do
+              if [ -f "$file" ]; then
+                git add -f "$file"
+              fi
+            done
+
+            if git diff --cached --quiet; then
+              echo "NO CHANGES TO SAVE"
+              exit 0
+            fi
+
+            git commit -m "Update TOP100 Original paper data"
+
+            if git push origin HEAD:main; then
+              echo "PAPER FILES SAVED SUCCESSFULLY"
+              exit 0
+            fi
+
+            echo "Push conflict. Retrying..."
+            sleep 3
+          done
+
+          echo "ERROR: Could not save paper files"
+          exit 1
+
+      - name: Verify state file
+        if: success()
+        run: |
+          test -f TOP100_CRIPTO_AMC_POC_state.json
+          echo "STATE FILE EXISTS"
+          ls -lh TOP100_CRIPTO_AMC_POC_state.json
