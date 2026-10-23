@@ -1,0 +1,3 @@
+symbol,time_utc,direction,entry,stop,asian_high,asian_low,approx_poc,poc_confirms
+SOLUSDT,2026-10-23T16:20+00:00,SELL,104.3,104.86,104.81,103.42,104.375625,True
+BNBUSDT,2026-10-23T16:10+00:00,SELL,747.89,749.0,747.18,730.17,739.738125,False
