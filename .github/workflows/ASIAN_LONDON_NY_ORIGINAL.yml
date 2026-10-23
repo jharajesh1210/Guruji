@@ -4,13 +4,13 @@ name: ASIAN LONDON NY ORIGINAL PAPER
 on:
   workflow_dispatch:
   schedule:
-    - cron: "6,21,36,51 * * * *"
+    - cron: "2,17,32,47 * * * *"
 
 permissions:
   contents: write
 
 concurrency:
-  group: guruji-asian-london-ny-original
+  group: guruji-paper-scanners
   cancel-in-progress: false
 
 jobs:
@@ -22,8 +22,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true
           ref: main
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -49,47 +50,73 @@ jobs:
 
       - name: Save paper trading files
         if: success()
+        shell: bash
         run: |
+          set -euo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          echo "Checking generated files..."
+          PREFIX="ASIAN_LONDON_NY_PAPER"
+          STATE="${PREFIX}_state.json"
 
-          ls -lh ASIAN_LONDON_NY_PAPER_state.json || true
-          ls -lh ASIAN_LONDON_NY_PAPER_trades.csv || true
-          ls -lh ASIAN_LONDON_NY_PAPER_signals.csv || true
-
-          if [ ! -f ASIAN_LONDON_NY_PAPER_state.json ]; then
-            echo "ERROR: State file was not created"
+          if [ ! -f "$STATE" ]; then
+            echo "ERROR: State file not created"
             exit 1
           fi
 
-          git add -f ASIAN_LONDON_NY_PAPER_state.json
+          mkdir -p /tmp/asian-original-save
 
           for file in \
-            ASIAN_LONDON_NY_PAPER_trades.csv \
-            ASIAN_LONDON_NY_PAPER_signals.csv
+            "${PREFIX}_state.json" \
+            "${PREFIX}_trades.csv" \
+            "${PREFIX}_signals.csv"
           do
             if [ -f "$file" ]; then
-              git add -f "$file"
+              cp "$file" /tmp/asian-original-save/
             fi
           done
 
-          if git diff --cached --quiet; then
-            echo "NO CHANGES TO COMMIT"
-          else
-            git commit -m "Save Asian London NY paper state"
-            git push origin HEAD:main
-            echo "PAPER FILES PUSHED SUCCESSFULLY"
-          fi
+          for attempt in 1 2 3 4 5; do
+            echo "SAVE ATTEMPT: $attempt"
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            cp /tmp/asian-original-save/* .
+
+            for file in \
+              "${PREFIX}_state.json" \
+              "${PREFIX}_trades.csv" \
+              "${PREFIX}_signals.csv"
+            do
+              if [ -f "$file" ]; then
+                git add -f "$file"
+              fi
+            done
+
+            if git diff --cached --quiet; then
+              echo "NO CHANGES TO SAVE"
+              exit 0
+            fi
+
+            git commit -m "Update Asian London NY Original paper data"
+
+            if git push origin HEAD:main; then
+              echo "PAPER FILES SAVED SUCCESSFULLY"
+              exit 0
+            fi
+
+            echo "Push conflict. Retrying..."
+            sleep 3
+          done
+
+          echo "ERROR: Could not save paper files"
+          exit 1
 
       - name: Verify state file
         if: success()
         run: |
-          if [ -f ASIAN_LONDON_NY_PAPER_state.json ]; then
-            echo "STATE FILE EXISTS"
-            ls -lh ASIAN_LONDON_NY_PAPER_state.json
-          else
-            echo "ERROR: STATE FILE NOT FOUND"
-            exit 1
-          fi
+          test -f ASIAN_LONDON_NY_PAPER_state.json
+          echo "STATE FILE EXISTS"
+          ls -lh ASIAN_LONDON_NY_PAPER_state.json
