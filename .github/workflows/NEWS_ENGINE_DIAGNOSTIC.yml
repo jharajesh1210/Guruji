@@ -21,83 +21,98 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Dependencies
-        run: |
-          python -m pip install requests
-
-      - name: Diagnose without trading
-        env:
-          NEWS_CALENDAR_URL: ${{ secrets.NEWS_CALENDAR_URL }}
-          EXTRA_EVENTS_URL: ${{ secrets.EXTRA_EVENTS_URL }}
+      - name: Test Free Economic Calendar API
         run: |
           python - <<'PY'
-          import os
-          import traceback
-          from datetime import datetime, timezone
+          import json
+          import urllib.request
+          from datetime import datetime, timedelta, timezone
 
-          import NEWS_IMPACT_ENGINE as engine
+          print("========== FREE CALENDAR TEST ==========")
+          print("SOURCE: https://www.financecalendar.com")
+          print("UTC NOW:", datetime.now(timezone.utc).isoformat())
 
-          now = datetime.now(timezone.utc)
+          today = datetime.now(timezone.utc).date()
+          start = (today - timedelta(days=1)).isoformat()
+          end = (today + timedelta(days=30)).isoformat()
 
-          print("========== NEWS ENGINE DIAGNOSTIC ==========", flush=True)
-          print("UTC TIME:", now.isoformat(), flush=True)
-          print("CALENDAR SOURCE:", "custom" if os.getenv("NEWS_CALENDAR_URL") else "default", flush=True)
-          print("EXTRA FEED:", "configured" if os.getenv("EXTRA_EVENTS_URL") else "local file / unconfigured", flush=True)
-
-          try:
-              extra_events, extra_error = engine._extra_events(now)
-
-              if extra_error:
-                  print("EXTRA STATUS: BLOCKED")
-                  print("EXTRA REASON:", extra_error)
-              else:
-                  print("EXTRA STATUS: OK")
-                  print("EXTRA EVENTS:", len(extra_events or []))
-
-          except Exception as exc:
-              print("EXTRA STATUS: ERROR")
-              print("EXTRA REASON:", repr(exc))
-
-          print("--------------------------------------------")
+          url = (
+              "https://www.financecalendar.com/wp-json/fc/v1/calendar"
+              f"?country=US&impact=high&from={start}&to={end}&limit=500"
+          )
 
           try:
-              events, error = engine._calendar(now)
+              request = urllib.request.Request(
+                  url,
+                  headers={"User-Agent": "Guruji-News-Diagnostic/1.0"}
+              )
 
-              if error:
-                  print("CALENDAR STATUS: BLOCKED")
-                  print("CALENDAR REASON:", error)
-              elif events is None:
-                  print("CALENDAR STATUS: BLOCKED")
-                  print("CALENDAR REASON: No verified events returned")
-              else:
-                  print("CALENDAR STATUS: OK")
-                  print("HIGH IMPACT USD EVENTS:", len(events))
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  print("HTTP STATUS:", response.status)
+                  data = json.load(response)
 
-                  for ev in events[:10]:
-                      print("EVENT:", ev["time"], ev["title"])
+              events = data.get("events", [])
+              if not isinstance(events, list):
+                  raise ValueError("Invalid events format")
 
-          except Exception as exc:
-              print("CALENDAR STATUS: ERROR")
-              print("CALENDAR REASON:", repr(exc))
-              traceback.print_exc()
+              print("TOTAL RETURNED EVENTS:", len(events))
+              print("TOTAL AVAILABLE:", data.get("total", "unknown"))
 
-          print("--------------------------------------------")
+              keywords = (
+                  "cpi", "consumer price",
+                  "ppi", "producer price",
+                  "nonfarm", "non-farm", "payroll",
+                  "fomc", "federal funds",
+                  "interest rate", "fed rate"
+              )
 
-          for side in ("LONG", "SHORT"):
-              try:
-                  blocked, reason = engine.entry_decision(
-                      "B-BTC_USDT", side, now
+              matched = []
+
+              for event in events:
+                  title = str(
+                      event.get("title")
+                      or event.get("name")
+                      or event.get("event")
+                      or ""
                   )
 
-                  print("BTC", side, "STATUS:",
-                        "BLOCKED" if blocked else "ALLOWED")
-                  print("BTC", side, "REASON:", reason)
+                  series = str(event.get("series", ""))
+                  combined = (title + " " + series).lower()
 
-              except Exception as exc:
-                  print("BTC", side, "STATUS: ERROR")
-                  print("BTC", side, "REASON:", repr(exc))
-                  traceback.print_exc()
+                  if any(word in combined for word in keywords):
+                      matched.append(event)
 
-          print("============================================")
-          print("DIAGNOSTIC COMPLETE - NO TRADES PLACED")
+              print("TARGET EVENTS FOUND:", len(matched))
+              print("--------------------------------------")
+
+              for event in matched[:20]:
+                  print("EVENT:", json.dumps(
+                      event, ensure_ascii=False, default=str
+                  )[:1500])
+
+              exact = [
+                  event for event in matched
+                  if event.get("release_at_utc")
+                  or event.get("time_utc")
+              ]
+
+              print("--------------------------------------")
+              print("TARGET EVENTS WITH TIME:", len(exact))
+
+              if not events:
+                  print("RESULT: INCOMPLETE - NO EVENTS")
+              elif not matched:
+                  print("RESULT: INCOMPLETE - TARGET EVENTS NOT FOUND")
+              elif not exact:
+                  print("RESULT: INCOMPLETE - EXACT TIMES MISSING")
+              else:
+                  print("RESULT: API ACCESS OK")
+                  print("NOTE: EVENT ACCURACY STILL NEEDS VERIFICATION")
+
+          except Exception as exc:
+              print("RESULT: API TEST FAILED")
+              print("ERROR:", repr(exc))
+
+          print("======================================")
+          print("DIAGNOSTIC ONLY - NO TRADES PLACED")
           PY
