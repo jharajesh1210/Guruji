@@ -23,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
+          ref: main
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -34,7 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install requests pandas numpy
 
-      - name: Verify scanner file
+      - name: Verify scanner
         run: |
           test -f ASIAN_LONDON_NY_PAPER.py
           python -m py_compile ASIAN_LONDON_NY_PAPER.py
@@ -53,20 +54,33 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           echo "Checking generated files..."
-          ls -la ASIAN_LONDON_NY_PAPER* || true
 
-          git add -A -- \
-            ASIAN_LONDON_NY_PAPER_state.json \
+          ls -lh ASIAN_LONDON_NY_PAPER_state.json || true
+          ls -lh ASIAN_LONDON_NY_PAPER_trades.csv || true
+          ls -lh ASIAN_LONDON_NY_PAPER_signals.csv || true
+
+          if [ ! -f ASIAN_LONDON_NY_PAPER_state.json ]; then
+            echo "ERROR: State file was not created"
+            exit 1
+          fi
+
+          git add -f ASIAN_LONDON_NY_PAPER_state.json
+
+          for file in \
             ASIAN_LONDON_NY_PAPER_trades.csv \
-            ASIAN_LONDON_NY_PAPER_signals.csv \
-            2>/dev/null || true
+            ASIAN_LONDON_NY_PAPER_signals.csv
+          do
+            if [ -f "$file" ]; then
+              git add -f "$file"
+            fi
+          done
 
           if git diff --cached --quiet; then
-            echo "No changes to save"
+            echo "NO CHANGES TO COMMIT"
           else
-            git commit -m "Update Asian London NY Original paper data"
-            git push
-            echo "PAPER HISTORY SAVED"
+            git commit -m "Save Asian London NY paper state"
+            git push origin HEAD:main
+            echo "PAPER FILES PUSHED SUCCESSFULLY"
           fi
 
       - name: Verify state file
@@ -76,6 +90,6 @@ jobs:
             echo "STATE FILE EXISTS"
             ls -lh ASIAN_LONDON_NY_PAPER_state.json
           else
-            echo "STATE FILE NOT FOUND"
+            echo "ERROR: STATE FILE NOT FOUND"
             exit 1
           fi
