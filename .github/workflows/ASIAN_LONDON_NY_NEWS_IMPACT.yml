@@ -23,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
           persist-credentials: true
 
       - name: Setup Python
@@ -35,7 +36,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install requests pandas numpy
 
-      - name: Verify Python files
+      - name: Verify scanner files
         run: |
           test -f ASIAN_LONDON_NY_PAPER_NEWS_IMPACT.py
           test -f NEWS_IMPACT_ENGINE.py
@@ -53,43 +54,75 @@ jobs:
 
       - name: Save paper trading files
         if: success()
+        shell: bash
         run: |
+          set -euo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           PREFIX="ASIAN_LONDON_NY_PAPER_NEWS_IMPACT"
+          STATE="${PREFIX}_state.json"
 
-          echo "Checking generated files..."
-          ls -lh "${PREFIX}"_*.json "${PREFIX}"_*.csv 2>/dev/null || true
-
-          if [ ! -f "${PREFIX}_state.json" ]; then
+          if [ ! -f "$STATE" ]; then
             echo "ERROR: State file not created"
             exit 1
           fi
 
-          git add -f "${PREFIX}_state.json"
+          mkdir -p /tmp/asian-news-save
 
           for file in \
+            "${PREFIX}_state.json" \
             "${PREFIX}_trades.csv" \
             "${PREFIX}_signals.csv" \
             "${PREFIX}_news_skips.csv"
           do
             if [ -f "$file" ]; then
-              git add -f "$file"
+              cp "$file" /tmp/asian-news-save/
             fi
           done
 
-          if git diff --cached --quiet; then
-            echo "NO CHANGES TO COMMIT"
-          else
+          for attempt in 1 2 3 4 5; do
+            echo "SAVE ATTEMPT: $attempt"
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            cp /tmp/asian-news-save/* .
+
+            for file in \
+              "${PREFIX}_state.json" \
+              "${PREFIX}_trades.csv" \
+              "${PREFIX}_signals.csv" \
+              "${PREFIX}_news_skips.csv"
+            do
+              if [ -f "$file" ]; then
+                git add -f "$file"
+              fi
+            done
+
+            if git diff --cached --quiet; then
+              echo "NO CHANGES TO SAVE"
+              exit 0
+            fi
+
             git commit -m "Update Asian London NY News Impact paper data"
-            git push origin HEAD:main
-            echo "PAPER FILES PUSHED SUCCESSFULLY"
-          fi
+
+            if git push origin HEAD:main; then
+              echo "PAPER FILES SAVED SUCCESSFULLY"
+              exit 0
+            fi
+
+            echo "Push conflict. Retrying..."
+            sleep 3
+          done
+
+          echo "ERROR: Could not save paper files"
+          exit 1
 
       - name: Verify state file
         if: success()
         run: |
           test -f ASIAN_LONDON_NY_PAPER_NEWS_IMPACT_state.json
-          echo "NEWS IMPACT STATE FILE EXISTS"
+          echo "STATE FILE EXISTS"
           ls -lh ASIAN_LONDON_NY_PAPER_NEWS_IMPACT_state.json
