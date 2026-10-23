@@ -1,0 +1,32 @@
+
+name: ALL 6 SCANNERS RESULTS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  master_results:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate Master CSV
+        run: python ALL_6_SCANNERS_RESULTS.py
+
+      - name: Upload Master CSV
+        uses: actions/upload-artifact@v4
+        with:
+          name: ALL_6_SCANNERS_RESULTS
+          path: ALL_6_SCANNERS_RESULTS.csv
+          if-no-files-found: error
