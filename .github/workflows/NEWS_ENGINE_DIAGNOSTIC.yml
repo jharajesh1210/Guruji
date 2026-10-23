@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install requests
+      - name: Install dependencies
         run: python -m pip install requests
 
       - name: Test actual News Impact Engine
@@ -30,20 +30,27 @@ jobs:
           python - <<'PY'
           import sys
           from datetime import datetime, timedelta, timezone
+          from unittest.mock import patch
 
           import NEWS_IMPACT_ENGINE as engine
 
-          print("========== NEWS ENGINE TEST ==========")
+          print("========== NEWS ENGINE TEST ==========", flush=True)
 
           now = datetime.now(timezone.utc)
-          print("UTC NOW:", now.isoformat())
+          print("UTC NOW:", now.isoformat(), flush=True)
 
           events, error = engine._calendar(now)
 
-          if error:
+          if error or events is None:
               print("CALENDAR STATUS: BLOCKED")
-              print("REASON:", error)
+              print("REASON:", error or "Events are None")
               print("FAIL-CLOSED: PASS")
+              print("LIVE CALENDAR TEST: FAILED")
+              sys.exit(1)
+
+          if not isinstance(events, list) or len(events) == 0:
+              print("CALENDAR STATUS: BLOCKED")
+              print("REASON: No valid events")
               sys.exit(1)
 
           print("CALENDAR STATUS: OK")
@@ -55,26 +62,23 @@ jobs:
           ]
 
           if not future:
-              print("NO FUTURE EVENT AVAILABLE FOR TEST")
+              print("NO FUTURE EVENT AVAILABLE")
               sys.exit(1)
 
-          event = min(
-              future,
-              key=lambda e: e["time"]
-          )
+          event = min(future, key=lambda e: e["time"])
 
           print("TEST EVENT:", event["title"])
           print("EVENT UTC:", event["time"])
 
-          def check(label, test_time, expected):
+          def check(label, test_time, side, expected):
               blocked, reason = engine.entry_decision(
                   "B-BTC_USDT",
-                  "LONG",
+                  side,
                   now=test_time
               )
 
               print("-----------------------------------")
-              print(label)
+              print("TEST:", label)
               print("BLOCKED:", blocked)
               print("REASON:", reason)
 
@@ -84,55 +88,65 @@ jobs:
 
           results = []
 
-          results.append(check(
-              "15 MIN BEFORE NEWS",
-              event["time"] - timedelta(minutes=15),
-              True
-          ))
-
-          results.append(check(
-              "15 MIN AFTER NEWS",
-              event["time"] + timedelta(minutes=15),
-              True
-          ))
-
-          # Simulate a verified BTC LONG reaction.
-          # No CoinDCX request or order is made here.
-          original_reaction = engine._btc_reaction
-
-          try:
-              engine._btc_reaction = (
-                  lambda event_time, current_time:
-                  ("LONG", "SIMULATED BTC LONG")
-              )
+          # Use the fetched event for controlled
+          # timing tests without further API calls.
+          with patch.object(
+              engine,
+              "_calendar",
+              return_value=([event], None)
+          ):
 
               results.append(check(
-                  "60 MIN AFTER NEWS - BTC LONG",
-                  event["time"] + timedelta(minutes=60),
-                  False
-              ))
-
-              engine._btc_reaction = (
-                  lambda event_time, current_time:
-                  ("SHORT", "SIMULATED BTC SHORT")
-              )
-
-              results.append(check(
-                  "60 MIN AFTER NEWS - BTC SHORT",
-                  event["time"] + timedelta(minutes=60),
+                  "15 MIN BEFORE NEWS",
+                  event["time"] - timedelta(minutes=15),
+                  "LONG",
                   True
               ))
 
-          finally:
-              engine._btc_reaction = original_reaction
+              results.append(check(
+                  "15 MIN AFTER NEWS",
+                  event["time"] + timedelta(minutes=15),
+                  "LONG",
+                  True
+              ))
+
+              with patch.object(
+                  engine,
+                  "_btc_reaction",
+                  return_value=(
+                      "LONG",
+                      "SIMULATED BTC LONG"
+                  )
+              ):
+                  results.append(check(
+                      "60 MIN AFTER NEWS - BTC LONG",
+                      event["time"] + timedelta(minutes=60),
+                      "LONG",
+                      False
+                  ))
+
+              with patch.object(
+                  engine,
+                  "_btc_reaction",
+                  return_value=(
+                      "SHORT",
+                      "SIMULATED BTC SHORT"
+                  )
+              ):
+                  results.append(check(
+                      "60 MIN AFTER NEWS - BTC SHORT",
+                      event["time"] + timedelta(minutes=60),
+                      "LONG",
+                      True
+                  ))
 
           print("===================================")
 
           if all(results):
               print("FINAL RESULT: ALL TESTS PASSED")
+              print("NOTE: BTC reactions were simulated")
+              print("NO TRADES PLACED")
           else:
               print("FINAL RESULT: TEST FAILED")
               sys.exit(1)
-
-          print("DIAGNOSTIC ONLY - NO TRADES PLACED")
           PY
