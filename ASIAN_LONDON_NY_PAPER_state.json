@@ -1,86 +1,13 @@
 {
-  "positions": [
-    {
-      "symbol": "SOLUSDT",
-      "direction": "SELL",
-      "leg": "2R",
-      "entry": 104.3,
-      "stop": 104.86,
-      "initial_stop": 104.86,
-      "target": 103.17999999999999,
-      "risk": 0.5600000000000023,
-      "entry_time_utc": "2026-10-23T16:20+00:00",
-      "last_checked_t": 1792772400000
-    },
-    {
-      "symbol": "SOLUSDT",
-      "direction": "SELL",
-      "leg": "3R",
-      "entry": 104.3,
-      "stop": 104.86,
-      "initial_stop": 104.86,
-      "target": 102.61999999999999,
-      "risk": 0.5600000000000023,
-      "entry_time_utc": "2026-10-23T16:20+00:00",
-      "last_checked_t": 1792772400000
-    },
-    {
-      "symbol": "SOLUSDT",
-      "direction": "SELL",
-      "leg": "4R",
-      "entry": 104.3,
-      "stop": 104.86,
-      "initial_stop": 104.86,
-      "target": 102.05999999999999,
-      "risk": 0.5600000000000023,
-      "entry_time_utc": "2026-10-23T16:20+00:00",
-      "last_checked_t": 1792772400000
-    },
-    {
-      "symbol": "BNBUSDT",
-      "direction": "SELL",
-      "leg": "2R",
-      "entry": 747.89,
-      "stop": 749.0,
-      "initial_stop": 749.0,
-      "target": 745.67,
-      "risk": 1.1100000000000136,
-      "entry_time_utc": "2026-10-23T16:10+00:00",
-      "last_checked_t": 1792771800000
-    },
-    {
-      "symbol": "BNBUSDT",
-      "direction": "SELL",
-      "leg": "3R",
-      "entry": 747.89,
-      "stop": 749.0,
-      "initial_stop": 749.0,
-      "target": 744.56,
-      "risk": 1.1100000000000136,
-      "entry_time_utc": "2026-10-23T16:10+00:00",
-      "last_checked_t": 1792771800000
-    },
-    {
-      "symbol": "BNBUSDT",
-      "direction": "SELL",
-      "leg": "4R",
-      "entry": 747.89,
-      "stop": 749.0,
-      "initial_stop": 749.0,
-      "target": 743.4499999999999,
-      "risk": 1.1100000000000136,
-      "entry_time_utc": "2026-10-23T16:10+00:00",
-      "last_checked_t": 1792771800000
-    }
-  ],
+  "positions": [],
   "entered_days": {
     "SOLUSDT": "2026-10-23",
     "BNBUSDT": "2026-10-23"
   },
   "last_closed_bar": {
-    "BTCUSDT": 1792773000000,
-    "ETHUSDT": 1792773000000,
-    "SOLUSDT": 1792773000000,
-    "BNBUSDT": 1792773000000
+    "BTCUSDT": 1792773900000,
+    "ETHUSDT": 1792773900000,
+    "SOLUSDT": 1792773900000,
+    "BNBUSDT": 1792773900000
   }
 }
