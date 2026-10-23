@@ -1,0 +1,80 @@
+
+name: TOP100 ORIGINAL PAPER
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "3,18,33,48 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: guruji-top100-original
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests pandas numpy
+
+      - name: Verify scanner
+        run: |
+          test -f TOP100_CRIPTO_AMC_POC.py
+          python -m py_compile TOP100_CRIPTO_AMC_POC.py
+
+      - name: Run TOP100 Original scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python -u TOP100_CRIPTO_AMC_POC.py
+
+      - name: Save paper trading history
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "Checking paper trading files..."
+
+          ls -la TOP100_CRIPTO_AMC_POC* || true
+
+          git add -A -- \
+            ':(glob)TOP100_CRIPTO_AMC_POC_*.json' \
+            ':(glob)TOP100_CRIPTO_AMC_POC_*.csv'
+
+          if git diff --cached --quiet; then
+            echo "No new paper files to save"
+          else
+            git commit -m "Update TOP100 Original paper trading data"
+            git push
+            echo "PAPER HISTORY SAVED"
+          fi
+
+      - name: Verify state
+        if: success()
+        run: |
+          if [ -f TOP100_CRIPTO_AMC_POC_state.json ]; then
+            echo "STATE FILE EXISTS"
+            ls -lh TOP100_CRIPTO_AMC_POC_state.json
+          else
+            echo "WARNING: State file not found"
+            exit 1
+          fi
