@@ -1,0 +1,64 @@
+
+name: TELEGRAM TEST
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  telegram_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Telegram Test Message
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import os
+          import json
+          import urllib.request
+
+          token = os.environ.get("BOT_TOKEN", "")
+          chat_id = os.environ.get("CHAT_ID", "")
+
+          if not token or not chat_id:
+              raise SystemExit("ERROR: Telegram secrets missing")
+
+          message = (
+              "GURUJI TELEGRAM TEST SUCCESS\n"
+              "6 PAPER SCANNERS\n"
+              "TOP100 ORIGINAL\n"
+              "ASIAN LONDON NY ORIGINAL\n"
+              "BTC SMC ORIGINAL\n"
+              "TOP100 NEWS IMPACT\n"
+              "ASIAN LONDON NY NEWS IMPACT\n"
+              "BTC SMC NEWS IMPACT\n"
+              "PAPER TRADING ONLY"
+          )
+
+          url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+          data = json.dumps({
+              "chat_id": chat_id,
+              "text": message
+          }).encode("utf-8")
+
+          request = urllib.request.Request(
+              url,
+              data=data,
+              headers={"Content-Type": "application/json"},
+              method="POST"
+          )
+
+          with urllib.request.urlopen(request, timeout=20) as response:
+              result = json.load(response)
+
+          if not result.get("ok"):
+              raise SystemExit("Telegram delivery failed")
+
+          print("TELEGRAM TEST SUCCESS")
+          PY
