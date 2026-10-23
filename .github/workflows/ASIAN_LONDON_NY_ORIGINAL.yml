@@ -1,0 +1,81 @@
+
+name: ASIAN LONDON NY ORIGINAL PAPER
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "6,21,36,51 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: guruji-asian-london-ny-original
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests pandas numpy
+
+      - name: Verify scanner file
+        run: |
+          test -f ASIAN_LONDON_NY_PAPER.py
+          python -m py_compile ASIAN_LONDON_NY_PAPER.py
+
+      - name: Run Asian London NY scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python -u ASIAN_LONDON_NY_PAPER.py
+
+      - name: Save paper trading files
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "Checking generated files..."
+          ls -la ASIAN_LONDON_NY_PAPER* || true
+
+          git add -A -- \
+            ASIAN_LONDON_NY_PAPER_state.json \
+            ASIAN_LONDON_NY_PAPER_trades.csv \
+            ASIAN_LONDON_NY_PAPER_signals.csv \
+            2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to save"
+          else
+            git commit -m "Update Asian London NY Original paper data"
+            git push
+            echo "PAPER HISTORY SAVED"
+          fi
+
+      - name: Verify state file
+        if: success()
+        run: |
+          if [ -f ASIAN_LONDON_NY_PAPER_state.json ]; then
+            echo "STATE FILE EXISTS"
+            ls -lh ASIAN_LONDON_NY_PAPER_state.json
+          else
+            echo "STATE FILE NOT FOUND"
+            exit 1
+          fi
