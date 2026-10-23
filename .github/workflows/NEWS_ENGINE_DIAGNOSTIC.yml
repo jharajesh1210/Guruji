@@ -21,98 +21,118 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Test Free Economic Calendar API
+      - name: Install requests
+        run: python -m pip install requests
+
+      - name: Test actual News Impact Engine
+        shell: bash
         run: |
           python - <<'PY'
-          import json
-          import urllib.request
+          import sys
           from datetime import datetime, timedelta, timezone
 
-          print("========== FREE CALENDAR TEST ==========")
-          print("SOURCE: https://www.financecalendar.com")
-          print("UTC NOW:", datetime.now(timezone.utc).isoformat())
+          import NEWS_IMPACT_ENGINE as engine
 
-          today = datetime.now(timezone.utc).date()
-          start = (today - timedelta(days=1)).isoformat()
-          end = (today + timedelta(days=30)).isoformat()
+          print("========== NEWS ENGINE TEST ==========")
 
-          url = (
-              "https://www.financecalendar.com/wp-json/fc/v1/calendar"
-              f"?country=US&impact=high&from={start}&to={end}&limit=500"
+          now = datetime.now(timezone.utc)
+          print("UTC NOW:", now.isoformat())
+
+          events, error = engine._calendar(now)
+
+          if error:
+              print("CALENDAR STATUS: BLOCKED")
+              print("REASON:", error)
+              print("FAIL-CLOSED: PASS")
+              sys.exit(1)
+
+          print("CALENDAR STATUS: OK")
+          print("EVENTS:", len(events))
+
+          future = [
+              e for e in events
+              if e["time"] > now + timedelta(minutes=40)
+          ]
+
+          if not future:
+              print("NO FUTURE EVENT AVAILABLE FOR TEST")
+              sys.exit(1)
+
+          event = min(
+              future,
+              key=lambda e: e["time"]
           )
 
+          print("TEST EVENT:", event["title"])
+          print("EVENT UTC:", event["time"])
+
+          def check(label, test_time, expected):
+              blocked, reason = engine.entry_decision(
+                  "B-BTC_USDT",
+                  "LONG",
+                  now=test_time
+              )
+
+              print("-----------------------------------")
+              print(label)
+              print("BLOCKED:", blocked)
+              print("REASON:", reason)
+
+              passed = blocked == expected
+              print("RESULT:", "PASS" if passed else "FAIL")
+              return passed
+
+          results = []
+
+          results.append(check(
+              "15 MIN BEFORE NEWS",
+              event["time"] - timedelta(minutes=15),
+              True
+          ))
+
+          results.append(check(
+              "15 MIN AFTER NEWS",
+              event["time"] + timedelta(minutes=15),
+              True
+          ))
+
+          # Simulate a verified BTC LONG reaction.
+          # No CoinDCX request or order is made here.
+          original_reaction = engine._btc_reaction
+
           try:
-              request = urllib.request.Request(
-                  url,
-                  headers={"User-Agent": "Guruji-News-Diagnostic/1.0"}
+              engine._btc_reaction = (
+                  lambda event_time, current_time:
+                  ("LONG", "SIMULATED BTC LONG")
               )
 
-              with urllib.request.urlopen(request, timeout=20) as response:
-                  print("HTTP STATUS:", response.status)
-                  data = json.load(response)
+              results.append(check(
+                  "60 MIN AFTER NEWS - BTC LONG",
+                  event["time"] + timedelta(minutes=60),
+                  False
+              ))
 
-              events = data.get("events", [])
-              if not isinstance(events, list):
-                  raise ValueError("Invalid events format")
-
-              print("TOTAL RETURNED EVENTS:", len(events))
-              print("TOTAL AVAILABLE:", data.get("total", "unknown"))
-
-              keywords = (
-                  "cpi", "consumer price",
-                  "ppi", "producer price",
-                  "nonfarm", "non-farm", "payroll",
-                  "fomc", "federal funds",
-                  "interest rate", "fed rate"
+              engine._btc_reaction = (
+                  lambda event_time, current_time:
+                  ("SHORT", "SIMULATED BTC SHORT")
               )
 
-              matched = []
+              results.append(check(
+                  "60 MIN AFTER NEWS - BTC SHORT",
+                  event["time"] + timedelta(minutes=60),
+                  True
+              ))
 
-              for event in events:
-                  title = str(
-                      event.get("title")
-                      or event.get("name")
-                      or event.get("event")
-                      or ""
-                  )
+          finally:
+              engine._btc_reaction = original_reaction
 
-                  series = str(event.get("series", ""))
-                  combined = (title + " " + series).lower()
+          print("===================================")
 
-                  if any(word in combined for word in keywords):
-                      matched.append(event)
+          if all(results):
+              print("FINAL RESULT: ALL TESTS PASSED")
+          else:
+              print("FINAL RESULT: TEST FAILED")
+              sys.exit(1)
 
-              print("TARGET EVENTS FOUND:", len(matched))
-              print("--------------------------------------")
-
-              for event in matched[:20]:
-                  print("EVENT:", json.dumps(
-                      event, ensure_ascii=False, default=str
-                  )[:1500])
-
-              exact = [
-                  event for event in matched
-                  if event.get("release_at_utc")
-                  or event.get("time_utc")
-              ]
-
-              print("--------------------------------------")
-              print("TARGET EVENTS WITH TIME:", len(exact))
-
-              if not events:
-                  print("RESULT: INCOMPLETE - NO EVENTS")
-              elif not matched:
-                  print("RESULT: INCOMPLETE - TARGET EVENTS NOT FOUND")
-              elif not exact:
-                  print("RESULT: INCOMPLETE - EXACT TIMES MISSING")
-              else:
-                  print("RESULT: API ACCESS OK")
-                  print("NOTE: EVENT ACCURACY STILL NEEDS VERIFICATION")
-
-          except Exception as exc:
-              print("RESULT: API TEST FAILED")
-              print("ERROR:", repr(exc))
-
-          print("======================================")
           print("DIAGNOSTIC ONLY - NO TRADES PLACED")
           PY
