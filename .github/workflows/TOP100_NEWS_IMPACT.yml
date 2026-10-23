@@ -1,0 +1,93 @@
+
+name: TOP100 NEWS IMPACT PAPER
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "4,19,34,49 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: guruji-paper-scanners
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests pandas numpy
+
+      - name: Verify Python files
+        run: |
+          test -f TOP100_CRIPTO_AMC_POC_NEWS_IMPACT.py
+          test -f NEWS_IMPACT_ENGINE.py
+          python -m py_compile \
+            TOP100_CRIPTO_AMC_POC_NEWS_IMPACT.py \
+            NEWS_IMPACT_ENGINE.py
+
+      - name: Run TOP100 News Impact scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          NEWS_CALENDAR_URL: ${{ secrets.NEWS_CALENDAR_URL }}
+        run: |
+          python -u TOP100_CRIPTO_AMC_POC_NEWS_IMPACT.py
+
+      - name: Save paper trading files
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "Checking News Impact paper files..."
+
+          if [ ! -f TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json ]; then
+            echo "ERROR: News Impact state file missing"
+            exit 1
+          fi
+
+          git add -f TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json
+
+          for file in \
+            TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_trades.csv \
+            TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_signals.csv \
+            TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_universe.csv \
+            TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_news_skips.csv
+          do
+            if [ -f "$file" ]; then
+              git add -f "$file"
+            fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "NO CHANGES TO COMMIT"
+          else
+            git commit -m "Update TOP100 News Impact paper data"
+            git push origin HEAD:main
+            echo "PAPER FILES PUSHED SUCCESSFULLY"
+          fi
+
+      - name: Verify state file
+        if: success()
+        run: |
+          test -f TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json
+          echo "NEWS IMPACT STATE FILE EXISTS"
+          ls -lh TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json
