@@ -1,3 +1,4 @@
+
 name: NEWS ENGINE DIAGNOSTIC
 
 on:
@@ -10,15 +11,20 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Python
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
+
       - name: Dependencies
-        run: python -m pip install requests
+        run: |
+          python -m pip install requests
+
       - name: Diagnose without trading
         env:
           NEWS_CALENDAR_URL: ${{ secrets.NEWS_CALENDAR_URL }}
@@ -26,20 +32,72 @@ jobs:
         run: |
           python - <<'PY'
           import os
+          import traceback
           from datetime import datetime, timezone
+
           import NEWS_IMPACT_ENGINE as engine
+
           now = datetime.now(timezone.utc)
-          print('UTC TIME:', now.isoformat())
-          print('CALENDAR SOURCE:', 'custom' if os.getenv('NEWS_CALENDAR_URL') else 'default')
-          print('EXTRA FEED:', 'URL configured' if os.getenv('EXTRA_EVENTS_URL') else 'local file / unconfigured')
-          extra, extra_error = engine._extra_events(now)
-          print('EXTRA STATUS:', 'OK' if extra_error is None else 'BLOCKED')
-          print('EXTRA REASON:', extra_error or f'{len(extra)} validated events')
-          events, error = engine._calendar(now)
-          print('CALENDAR STATUS:', 'OK' if error is None else 'BLOCKED')
-          print('CALENDAR REASON:', error or f'{len(events)} relevant events')
-          blocked, reason = engine.entry_decision('B-BTC_USDT', 'LONG', now)
-          print('TEST ENTRY LONG:', 'BLOCKED' if blocked else 'ALLOWED')
-          print('TEST REASON:', reason)
-          print('NO TRADES PLACED. NO STATE FILES CHANGED.')
+
+          print("========== NEWS ENGINE DIAGNOSTIC ==========", flush=True)
+          print("UTC TIME:", now.isoformat(), flush=True)
+          print("CALENDAR SOURCE:", "custom" if os.getenv("NEWS_CALENDAR_URL") else "default", flush=True)
+          print("EXTRA FEED:", "configured" if os.getenv("EXTRA_EVENTS_URL") else "local file / unconfigured", flush=True)
+
+          try:
+              extra_events, extra_error = engine._extra_events(now)
+
+              if extra_error:
+                  print("EXTRA STATUS: BLOCKED")
+                  print("EXTRA REASON:", extra_error)
+              else:
+                  print("EXTRA STATUS: OK")
+                  print("EXTRA EVENTS:", len(extra_events or []))
+
+          except Exception as exc:
+              print("EXTRA STATUS: ERROR")
+              print("EXTRA REASON:", repr(exc))
+
+          print("--------------------------------------------")
+
+          try:
+              events, error = engine._calendar(now)
+
+              if error:
+                  print("CALENDAR STATUS: BLOCKED")
+                  print("CALENDAR REASON:", error)
+              elif events is None:
+                  print("CALENDAR STATUS: BLOCKED")
+                  print("CALENDAR REASON: No verified events returned")
+              else:
+                  print("CALENDAR STATUS: OK")
+                  print("HIGH IMPACT USD EVENTS:", len(events))
+
+                  for ev in events[:10]:
+                      print("EVENT:", ev["time"], ev["title"])
+
+          except Exception as exc:
+              print("CALENDAR STATUS: ERROR")
+              print("CALENDAR REASON:", repr(exc))
+              traceback.print_exc()
+
+          print("--------------------------------------------")
+
+          for side in ("LONG", "SHORT"):
+              try:
+                  blocked, reason = engine.entry_decision(
+                      "B-BTC_USDT", side, now
+                  )
+
+                  print("BTC", side, "STATUS:",
+                        "BLOCKED" if blocked else "ALLOWED")
+                  print("BTC", side, "REASON:", reason)
+
+              except Exception as exc:
+                  print("BTC", side, "STATUS: ERROR")
+                  print("BTC", side, "REASON:", repr(exc))
+                  traceback.print_exc()
+
+          print("============================================")
+          print("DIAGNOSTIC COMPLETE - NO TRADES PLACED")
           PY
