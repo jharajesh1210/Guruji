@@ -45,7 +45,7 @@ KEYWORDS = (
 )
 
 _cache = {
-    "at": 0,
+    "at": -CACHE_SEC,
     "events": None,
     "error": None,
 }
