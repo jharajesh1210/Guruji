@@ -4,13 +4,13 @@ name: BTC SMC ORIGINAL PAPER
 on:
   workflow_dispatch:
   schedule:
-    - cron: "8,13,18,23,28,33,38,43,48,53,58,3 * * * *"
+    - cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
 
 permissions:
   contents: write
 
 concurrency:
-  group: guruji-btc-smc-original
+  group: guruji-paper-scanners
   cancel-in-progress: false
 
 jobs:
@@ -22,8 +22,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true
           ref: main
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -49,34 +50,72 @@ jobs:
 
       - name: Save paper trading files
         if: success()
+        shell: bash
         run: |
+          set -euo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          echo "Checking generated files..."
+          STATE="BTC_SMC_Paper_state.json"
+          TRADES="BTC_SMC_Paper_trades.csv"
 
-          if [ ! -f BTC_SMC_Paper_state.json ]; then
+          if [ ! -f "$STATE" ]; then
             echo "ERROR: State file not created"
             exit 1
           fi
 
-          git add -f BTC_SMC_Paper_state.json
+          mkdir -p /tmp/btc-smc-save
+          cp "$STATE" /tmp/btc-smc-save/state.json
 
-          if [ -f BTC_SMC_Paper_trades.csv ]; then
-            git add -f BTC_SMC_Paper_trades.csv
+          if [ -f "$TRADES" ]; then
+            cp "$TRADES" /tmp/btc-smc-save/trades.csv
           fi
 
-          if git diff --cached --quiet; then
-            echo "NO CHANGES TO COMMIT"
-          else
+          for attempt in 1 2 3 4 5; do
+            echo "SAVE ATTEMPT: $attempt"
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            cp /tmp/btc-smc-save/state.json "$STATE"
+
+            if [ -f /tmp/btc-smc-save/trades.csv ]; then
+              cp /tmp/btc-smc-save/trades.csv "$TRADES"
+            fi
+
+            git add -f "$STATE"
+
+            if [ -f "$TRADES" ]; then
+              git add -f "$TRADES"
+            fi
+
+            if git diff --cached --quiet; then
+              echo "NO CHANGES TO SAVE"
+              exit 0
+            fi
+
             git commit -m "Update BTC SMC Original paper state"
-            git push origin HEAD:main
-            echo "PAPER FILES PUSHED SUCCESSFULLY"
-          fi
+
+            if git push origin HEAD:main; then
+              echo "PAPER FILES SAVED SUCCESSFULLY"
+              exit 0
+            fi
+
+            echo "Push conflict. Retrying..."
+            sleep 3
+          done
+
+          echo "ERROR: Could not save paper files after retries"
+          exit 1
 
       - name: Verify state file
         if: success()
         run: |
-          test -f BTC_SMC_Paper_state.json
-          echo "STATE FILE EXISTS"
-          ls -lh BTC_SMC_Paper_state.json
+          if [ -f BTC_SMC_Paper_state.json ]; then
+            echo "STATE FILE EXISTS"
+            ls -lh BTC_SMC_Paper_state.json
+          else
+            echo "ERROR: STATE FILE NOT FOUND"
+            exit 1
+          fi
