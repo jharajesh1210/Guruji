@@ -1,0 +1,45 @@
+name: NEWS ENGINE DIAGNOSTIC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Dependencies
+        run: python -m pip install requests
+      - name: Diagnose without trading
+        env:
+          NEWS_CALENDAR_URL: ${{ secrets.NEWS_CALENDAR_URL }}
+          EXTRA_EVENTS_URL: ${{ secrets.EXTRA_EVENTS_URL }}
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime, timezone
+          import NEWS_IMPACT_ENGINE as engine
+          now = datetime.now(timezone.utc)
+          print('UTC TIME:', now.isoformat())
+          print('CALENDAR SOURCE:', 'custom' if os.getenv('NEWS_CALENDAR_URL') else 'default')
+          print('EXTRA FEED:', 'URL configured' if os.getenv('EXTRA_EVENTS_URL') else 'local file / unconfigured')
+          extra, extra_error = engine._extra_events(now)
+          print('EXTRA STATUS:', 'OK' if extra_error is None else 'BLOCKED')
+          print('EXTRA REASON:', extra_error or f'{len(extra)} validated events')
+          events, error = engine._calendar(now)
+          print('CALENDAR STATUS:', 'OK' if error is None else 'BLOCKED')
+          print('CALENDAR REASON:', error or f'{len(events)} relevant events')
+          blocked, reason = engine.entry_decision('B-BTC_USDT', 'LONG', now)
+          print('TEST ENTRY LONG:', 'BLOCKED' if blocked else 'ALLOWED')
+          print('TEST REASON:', reason)
+          print('NO TRADES PLACED. NO STATE FILES CHANGED.')
+          PY
