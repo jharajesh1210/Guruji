@@ -1,0 +1,82 @@
+
+name: BTC SMC ORIGINAL PAPER
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "8,13,18,23,28,33,38,43,48,53,58,3 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: guruji-btc-smc-original
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests pandas numpy
+
+      - name: Verify scanner
+        run: |
+          test -f BTC_SMC_Paper.py
+          python -m py_compile BTC_SMC_Paper.py
+
+      - name: Run BTC SMC scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python -u BTC_SMC_Paper.py
+
+      - name: Save paper trading files
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "Checking generated files..."
+
+          if [ ! -f BTC_SMC_Paper_state.json ]; then
+            echo "ERROR: State file not created"
+            exit 1
+          fi
+
+          git add -f BTC_SMC_Paper_state.json
+
+          if [ -f BTC_SMC_Paper_trades.csv ]; then
+            git add -f BTC_SMC_Paper_trades.csv
+          fi
+
+          if git diff --cached --quiet; then
+            echo "NO CHANGES TO COMMIT"
+          else
+            git commit -m "Update BTC SMC Original paper state"
+            git push origin HEAD:main
+            echo "PAPER FILES PUSHED SUCCESSFULLY"
+          fi
+
+      - name: Verify state file
+        if: success()
+        run: |
+          test -f BTC_SMC_Paper_state.json
+          echo "STATE FILE EXISTS"
+          ls -lh BTC_SMC_Paper_state.json
