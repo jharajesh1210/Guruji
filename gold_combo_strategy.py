@@ -126,18 +126,77 @@ def load_csv(path: str) -> pd.DataFrame:
 
 
 def fetch_coindcx(symbol: str, days: int = 30, interval: str = "5m") -> pd.DataFrame:
-    """CoinDCX public candles. Network/pair-name verify kar lena."""
+    """Fetch CoinDCX futures candles using the documented candlesticks API."""
     import requests
-    pair = PAIRS[symbol.upper().replace("USDT", "")]
-    url = "https://public.coindcx.com/market_data/candles"
-    per_day = 288
-    limit = min(days * per_day, 10000)
-    r = requests.get(url, params={"pair": pair, "interval": interval, "limit": limit}, timeout=30)
-    r.raise_for_status()
-    df = pd.DataFrame(r.json())
-    df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
-    df = df.set_index("time")[["open", "high", "low", "close", "volume"]].astype(float)
-    return df.sort_index()
+    import time
+
+    symbol = symbol.upper().replace("USDT", "").strip()
+    if symbol not in PAIRS:
+        raise ValueError(f"Unsupported symbol: {symbol}")
+    pair = PAIRS[symbol]
+    resolution = {"5m": "5", "15m": "15", "1h": "60"}.get(interval)
+    if resolution is None:
+        raise ValueError(f"Unsupported interval: {interval}")
+
+    url = "https://public.coindcx.com/market_data/candlesticks"
+    end = int(time.time())
+    start = end - int(days * 86400)
+    rows = []
+
+    # One-day batches keep each 5-minute request within typical candle limits.
+    with requests.Session() as session:
+        for batch_start in range(start, end, 86400):
+            batch_end = min(batch_start + 86400, end)
+            params = {
+                "pair": pair,
+                "pcode": "f",
+                "resolution": resolution,
+                "from": batch_start,
+                "to": batch_end,
+            }
+            for attempt in range(3):
+                try:
+                    response = session.get(url, params=params, timeout=30)
+                    response.raise_for_status()
+                    payload = response.json()
+                    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+                        raise ValueError(f"Unexpected CoinDCX candle response for {pair}: {str(payload)[:200]}")
+                    rows.extend(payload["data"])
+                    break
+                except (requests.RequestException, ValueError) as exc:
+                    if attempt == 2:
+                        raise RuntimeError(f"CoinDCX candle request failed for {pair}: {exc}") from exc
+                    time.sleep(2 * (attempt + 1))
+
+    if not rows:
+        raise RuntimeError(
+            f"No candles returned for {pair}. Verify this exact futures pair "
+            "in CoinDCX active instruments."
+        )
+
+    df = pd.DataFrame(rows)
+    required = ["time", "open", "high", "low", "close", "volume"]
+    if any(col not in df.columns for col in required):
+        raise RuntimeError(f"Incomplete candle fields for {pair}: {list(df.columns)}")
+
+    numeric_time = pd.to_numeric(df["time"], errors="coerce")
+    unit = "ms" if numeric_time.dropna().median() > 1e11 else "s"
+    df["time"] = pd.to_datetime(numeric_time, unit=unit, utc=True, errors="coerce")
+    df = df.dropna(subset=["time"]).set_index("time")
+    df = df[["open", "high", "low", "close", "volume"]].apply(pd.to_numeric, errors="coerce")
+    df = df.dropna().sort_index()
+    df = df[~df.index.duplicated(keep="last")]
+    df = df[(df["high"] >= df["low"]) & (df["close"] > 0) & (df["volume"] >= 0)]
+    if df.empty:
+        raise RuntimeError(f"No valid candles for {pair}")
+    # Drop the current incomplete 5-minute bar before indicator calculations.
+    minutes = int(resolution)
+    now = pd.Timestamp.now(tz="UTC")
+    df = df[df.index + pd.Timedelta(minutes=minutes) <= now]
+    if len(df) < 100:
+        raise RuntimeError(f"Insufficient completed candles for {pair}: {len(df)}")
+    print(f"Fetched {len(df)} completed {interval} candles for {pair}", flush=True)
+    return df
 
 
 def synthetic(n: int = 288 * 60, seed: int = 7) -> pd.DataFrame:
@@ -472,8 +531,8 @@ def to_dataframe(trades):
 # --------------------------------------------------------------------------- #
 
 def scan(sig: pd.DataFrame, cfg: Cfg):
-    last = sig.iloc[-2]                       # last CLOSED candle
-    t = sig.index[-2]
+    last = sig.iloc[-1]                       # last CLOSED candle (fetch excludes incomplete)
+    t = sig.index[-1]
     print(f"\n[{cfg.symbol}] last closed 5m candle: {t}  close={last['close']:.2f}")
     print(f" 1H trend  : {'UP' if last['trend_up'] else 'DOWN' if last['trend_dn'] else 'NEUTRAL'}")
     print(f" Sweep low : {last['sweep_low']}   Sweep high: {last['sweep_high']}")
