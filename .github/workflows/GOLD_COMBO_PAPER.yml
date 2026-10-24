@@ -1,0 +1,62 @@
+name: GOLD COMBO AUTOMATIC PAPER
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '3,8,13,18,23,28,33,38,43,48,53,58 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gold-combo-paper-state
+  cancel-in-progress: false
+
+jobs:
+  gold-paper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Dependencies
+        run: python -m pip install pandas numpy requests
+      - name: Gold paper trading
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python -u GOLD_COMBO_PAPER.py
+      - name: Commit paper state and CSV
+        if: always()
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          shopt -s nullglob
+          files=(GOLD_COMBO_PAPER_state.json GOLD_COMBO_PAPER_trades.csv GOLD_COMBO_PAPER_signals.csv)
+          existing=()
+          for f in "${files[@]}"; do
+            if [ -f "$f" ]; then existing+=("$f"); fi
+          done
+          if [ ${#existing[@]} -eq 0 ]; then exit 0; fi
+          git add -f -- "${existing[@]}"
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Update gold combo paper results'
+          git pull --rebase origin main
+          git push origin HEAD:main
+      - name: Upload gold paper files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GOLD_COMBO_PAPER_RESULTS
+          path: |
+            GOLD_COMBO_PAPER_state.json
+            GOLD_COMBO_PAPER_trades.csv
+            GOLD_COMBO_PAPER_signals.csv
+          if-no-files-found: warn
