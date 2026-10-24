@@ -1,0 +1,101 @@
+
+name: TOP100 AMC POC V4 PAPER
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "2,17,32,47 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: top100-amc-poc-v4-paper
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas numpy requests
+
+      - name: Verify V4 scanner
+        run: |
+          test -f TOP100_CRIPTO_AMC_POC_V4.py
+          python -m py_compile TOP100_CRIPTO_AMC_POC_V4.py
+
+      - name: Run TOP100 V4 paper scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python -u TOP100_CRIPTO_AMC_POC_V4.py
+
+      - name: Save V4 paper trading files
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          shopt -s nullglob
+
+          files=(
+            TOP100_CRIPTO_AMC_POC_V4_state.json
+            TOP100_CRIPTO_AMC_POC_V4_trades.csv
+            TOP100_CRIPTO_AMC_POC_V4_signals.csv
+            TOP100_CRIPTO_AMC_POC_V4_skipped.csv
+            TOP100_CRIPTO_AMC_POC_V4_universe.csv
+          )
+
+          existing=()
+          for file in "${files[@]}"; do
+            if [ -f "$file" ]; then
+              existing+=("$file")
+            fi
+          done
+
+          if [ ${#existing[@]} -eq 0 ]; then
+            echo "No V4 files to save"
+            exit 0
+          fi
+
+          git add -f -- "${existing[@]}"
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "Update TOP100 V4 paper results"
+
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Upload V4 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TOP100_V4_PAPER_RESULTS
+          path: |
+            TOP100_CRIPTO_AMC_POC_V4_state.json
+            TOP100_CRIPTO_AMC_POC_V4_trades.csv
+            TOP100_CRIPTO_AMC_POC_V4_signals.csv
+            TOP100_CRIPTO_AMC_POC_V4_skipped.csv
+            TOP100_CRIPTO_AMC_POC_V4_universe.csv
+          if-no-files-found: warn
