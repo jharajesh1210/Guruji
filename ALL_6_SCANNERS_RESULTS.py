@@ -2,63 +2,65 @@
 import csv
 import json
 from pathlib import Path
+from collections import defaultdict
 from datetime import datetime, timezone
 
 # ============================================================
-# ALL SCANNERS MASTER RESULTS
-# 7 EXISTING SCANNERS + GOLD XAU + GOLD PAXG
-# PAPER TRADING REPORT ONLY - NO LIVE ORDERS
+# ALL SCANNERS MASTER PAPER RESULTS
+# 7 OLD SCANNERS + GOLD XAU + GOLD PAXG
+# NO REAL TRADING ORDERS
 # ============================================================
 
 ROOT = Path(__file__).resolve().parent
-
-OUTPUT_FILE = ROOT / "ALL_6_SCANNERS_RESULTS.csv"
+OUTPUT = ROOT / "ALL_6_SCANNERS_RESULTS.csv"
 
 SCANNERS = [
     {
         "name": "TOP100 ORIGINAL",
-        "file": "TOP100_CRIPTO_AMC_POC_state.json",
+        "state": "TOP100_CRIPTO_AMC_POC_state.json",
         "kind": "top100",
     },
     {
         "name": "ASIAN LONDON NY ORIGINAL",
-        "file": "ASIAN_LONDON_NY_PAPER_state.json",
+        "state": "ASIAN_LONDON_NY_PAPER_state.json",
+        "trades": "ASIAN_LONDON_NY_PAPER_trades.csv",
         "kind": "asian",
     },
     {
         "name": "BTC SMC ORIGINAL",
-        "file": "BTC_SMC_Paper_state.json",
+        "state": "BTC_SMC_Paper_state.json",
         "kind": "btc",
     },
     {
         "name": "TOP100 NEWS IMPACT",
-        "file": "TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json",
+        "state": "TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json",
         "kind": "top100",
     },
     {
         "name": "ASIAN LONDON NY NEWS IMPACT",
-        "file": "ASIAN_LONDON_NY_PAPER_NEWS_IMPACT_state.json",
+        "state": "ASIAN_LONDON_NY_PAPER_NEWS_IMPACT_state.json",
+        "trades": "ASIAN_LONDON_NY_PAPER_NEWS_IMPACT_trades.csv",
         "kind": "asian",
     },
     {
         "name": "BTC SMC NEWS IMPACT",
-        "file": "BTC_SMC_Paper_NEWS_IMPACT_state.json",
+        "state": "BTC_SMC_Paper_NEWS_IMPACT_state.json",
         "kind": "btc",
     },
     {
         "name": "TOP100 AMC POC V4 PAPER",
-        "file": "TOP100_CRIPTO_AMC_POC_V4_state.json",
+        "state": "TOP100_CRIPTO_AMC_POC_V4_state.json",
         "kind": "top100",
     },
     {
         "name": "GOLD XAU USDT",
-        "file": "GOLD_COMBO_PAPER_state.json",
+        "state": "GOLD_COMBO_PAPER_state.json",
         "kind": "gold",
         "symbol": "XAU",
     },
     {
         "name": "GOLD PAXG USDT",
-        "file": "GOLD_COMBO_PAPER_state.json",
+        "state": "GOLD_COMBO_PAPER_state.json",
         "kind": "gold",
         "symbol": "PAXG",
     },
@@ -80,23 +82,19 @@ HEADERS = [
 ]
 
 
-def number(value):
+def numeric(value):
     if isinstance(value, bool):
         return None
 
-    if isinstance(value, (int, float)):
-        return float(value)
-
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
+    try:
+        if value is None or value == "":
             return None
+        return float(value)
+    except (ValueError, TypeError):
+        return None
 
-    return None
 
-
-def show(value):
+def display(value):
     if value is None:
         return "N/A"
 
@@ -106,14 +104,16 @@ def show(value):
     return value
 
 
-def read_state(filename):
+def read_json(filename):
     path = ROOT / filename
 
     if not path.exists():
         return None, "MISSING"
 
     try:
-        with path.open("r", encoding="utf-8") as f:
+        with path.open(
+            "r", encoding="utf-8"
+        ) as f:
             state = json.load(f)
 
         if not isinstance(state, dict):
@@ -121,69 +121,217 @@ def read_state(filename):
 
         return state, "OK"
 
-    except Exception as e:
-        return None, "ERROR: " + str(e)
+    except (OSError, ValueError) as exc:
+        return None, "ERROR: " + str(exc)
 
 
-def positions_list(value):
-    if isinstance(value, list):
+def read_csv(filename):
+    path = ROOT / filename
+
+    if not path.exists():
+        return None, "MISSING"
+
+    try:
+        with path.open(
+            "r", encoding="utf-8-sig", newline=""
+        ) as f:
+            rows = list(csv.DictReader(f))
+
+        return rows, "OK"
+
+    except (OSError, csv.Error) as exc:
+        return None, "ERROR: " + str(exc)
+
+
+def get_positions(state):
+    positions = state.get("positions", [])
+
+    if isinstance(positions, list):
         return [
-            x for x in value
-            if isinstance(x, dict)
+            p for p in positions
+            if isinstance(p, dict)
         ]
 
-    if isinstance(value, dict):
+    if isinstance(positions, dict):
         return [
-            x for x in value.values()
-            if isinstance(x, dict)
+            p for p in positions.values()
+            if isinstance(p, dict)
         ]
 
     return []
 
 
-def asian_position_counts(state):
-    positions = positions_list(
-        state.get("positions", [])
+def asian_trade_key(row):
+    return (
+        str(row.get("symbol", "")),
+        str(row.get("direction", "")),
+        str(row.get("entry_time_utc", "")),
+        str(
+            row.get(
+                "entry_price",
+                row.get("entry", "")
+            )
+        ),
     )
 
-    # Each entry may have separate 2R, 3R and 4R legs.
-    # Count one entry as one trade.
-    trade_keys = set()
 
-    for index, position in enumerate(positions):
-        symbol = str(
-            position.get("symbol", "")
-        )
+def asian_open_key(row):
+    return (
+        str(row.get("symbol", "")),
+        str(row.get("direction", "")),
+        str(row.get("entry_time_utc", "")),
+        str(row.get("entry", "")),
+    )
 
-        direction = str(
-            position.get("direction", "")
-        )
 
-        entry = str(
-            position.get("entry", "")
-        )
+def asian_results(state, csv_filename):
+    result = {
+        "open": 0,
+        "legs": 0,
+        "closed": "N/A",
+        "wins": "N/A",
+        "losses": "N/A",
+        "win_rate": "N/A",
+        "net_pct": "N/A",
+        "net_usdt": "N/A",
+        "notes": "",
+    }
 
-        entry_time = str(
-            position.get("entry_time_utc", "")
-        )
+    positions = get_positions(state)
 
-        if symbol and entry_time:
-            key = (
-                symbol,
-                direction,
-                entry,
-                entry_time,
-            )
+    open_keys = set()
+
+    for index, pos in enumerate(positions):
+        key = asian_open_key(pos)
+
+        if key[0] and key[2]:
+            open_keys.add(key)
         else:
-            key = ("unknown", index)
+            open_keys.add(("unknown", index))
 
-        trade_keys.add(key)
+    result["open"] = len(open_keys)
+    result["legs"] = len(positions)
 
-    return len(trade_keys), len(positions)
+    rows, csv_status = read_csv(csv_filename)
+
+    if rows is None:
+        result["notes"] = (
+            "Open trades from JSON; "
+            "closed trade CSV " + csv_status
+        )
+        return result
+
+    if not rows:
+        result.update({
+            "closed": 0,
+            "wins": 0,
+            "losses": 0,
+            "win_rate": 0.0,
+            "net_pct": 0.0,
+            "net_usdt": 0.0,
+            "notes": "Trade CSV empty",
+        })
+        return result
+
+    groups = defaultdict(dict)
+
+    for row in rows:
+        key = asian_trade_key(row)
+        leg = str(row.get("leg", "")).upper()
+
+        if not all(key[:3]):
+            continue
+
+        if leg not in ("2R", "3R", "4R"):
+            continue
+
+        # Prevent duplicate exit records for same leg.
+        groups[key][leg] = row
+
+    closed_trades = 0
+    wins = 0
+    losses = 0
+
+    total_pct = 0.0
+    total_usdt = 0.0
+
+    partial_trades = 0
+    invalid_trades = 0
+
+    for key, legs in groups.items():
+        if not all(
+            leg in legs
+            for leg in ("2R", "3R", "4R")
+        ):
+            partial_trades += 1
+            continue
+
+        leg_pct = []
+        leg_usdt = []
+
+        valid = True
+
+        for leg in ("2R", "3R", "4R"):
+            row = legs[leg]
+
+            pct = numeric(
+                row.get("net_return_pct_per_leg")
+            )
+
+            pnl = numeric(
+                row.get("paper_pnl_usdt")
+            )
+
+            if pct is None or pnl is None:
+                valid = False
+                break
+
+            leg_pct.append(pct)
+            leg_usdt.append(pnl)
+
+        if not valid:
+            invalid_trades += 1
+            continue
+
+        # 3 equal legs make 1 complete trade.
+        # Percentage is the average of the three legs.
+        trade_pct = sum(leg_pct) / 3.0
+        trade_usdt = sum(leg_usdt)
+
+        closed_trades += 1
+        total_pct += trade_pct
+        total_usdt += trade_usdt
+
+        if trade_usdt > 0:
+            wins += 1
+        elif trade_usdt < 0:
+            losses += 1
+
+    result["closed"] = closed_trades
+    result["wins"] = wins
+    result["losses"] = losses
+
+    result["net_pct"] = round(total_pct, 6)
+    result["net_usdt"] = round(total_usdt, 2)
+
+    if closed_trades > 0:
+        result["win_rate"] = round(
+            wins / closed_trades * 100, 2
+        )
+    else:
+        result["win_rate"] = 0.0
+
+    result["notes"] = (
+        "Asian CSV checked; "
+        f"partial trades={partial_trades}; "
+        f"invalid trades={invalid_trades}; "
+        "3 legs = 1 complete trade"
+    )
+
+    return result
 
 
-def extract_results(state, kind, symbol=None):
-
+def gold_results(state, symbol):
     result = {
         "open": "N/A",
         "legs": "N/A",
@@ -196,61 +344,68 @@ def extract_results(state, kind, symbol=None):
         "notes": "",
     }
 
-    if kind == "asian":
+    pair = state.get(symbol)
 
-        open_trades, open_legs = (
-            asian_position_counts(state)
-        )
-
-        result["open"] = open_trades
-        result["legs"] = open_legs
-
+    if not isinstance(pair, dict):
         result["notes"] = (
-            "Open entries grouped by "
-            "symbol, direction, entry and time; "
-            "2R/3R/4R are separate legs"
+            "Gold pair state unavailable"
+        )
+        return result
+
+    result["open"] = (
+        1 if pair.get("position") is not None else 0
+    )
+
+    result["closed"] = pair.get(
+        "closed_count", "N/A"
+    )
+
+    result["wins"] = pair.get(
+        "wins", "N/A"
+    )
+
+    result["net_pct"] = pair.get(
+        "net_return_sum_pct", "N/A"
+    )
+
+    result["net_usdt"] = pair.get(
+        "net_pnl_usdt", "N/A"
+    )
+
+    closed = numeric(result["closed"])
+    wins = numeric(result["wins"])
+
+    if closed is not None and wins is not None:
+        result["losses"] = int(
+            max(0, closed - wins)
         )
 
-    elif kind == "gold":
-
-        pair = state.get(symbol)
-
-        if not isinstance(pair, dict):
-            result["notes"] = (
-                "Pair data missing from Gold state"
-            )
-            return result
-
-        position = pair.get("position")
-
-        result["open"] = (
-            1 if position is not None else 0
+        result["win_rate"] = (
+            round(wins / closed * 100, 2)
+            if closed > 0 else 0.0
         )
 
-        result["legs"] = "N/A"
+    result["notes"] = (
+        "Gold forward-only automatic paper trading"
+    )
 
-        result["closed"] = pair.get(
-            "closed_count", "N/A"
-        )
+    return result
 
-        result["wins"] = pair.get(
-            "wins", "N/A"
-        )
 
-        result["net_pct"] = pair.get(
-            "net_return_sum_pct", "N/A"
-        )
+def standard_results(state, kind):
+    result = {
+        "open": "N/A",
+        "legs": "N/A",
+        "closed": "N/A",
+        "wins": "N/A",
+        "losses": "N/A",
+        "win_rate": "N/A",
+        "net_pct": "N/A",
+        "net_usdt": "N/A",
+        "notes": "",
+    }
 
-        result["net_usdt"] = pair.get(
-            "net_pnl_usdt", "N/A"
-        )
-
-        result["notes"] = (
-            "Forward-only Gold automatic paper trading"
-        )
-
-    elif kind == "top100":
-
+    if kind == "top100":
         positions = state.get("open_trades")
 
         if isinstance(positions, (list, dict)):
@@ -268,12 +423,7 @@ def extract_results(state, kind, symbol=None):
             "net_return_sum_pct", "N/A"
         )
 
-        result["notes"] = (
-            "Cumulative trade returns, not account ROI"
-        )
-
     elif kind == "btc":
-
         positions = state.get("positions")
 
         if isinstance(positions, (list, dict)):
@@ -291,37 +441,33 @@ def extract_results(state, kind, symbol=None):
             "net_pct", "N/A"
         )
 
-        result["notes"] = (
-            "Cumulative trade returns, not account ROI"
-        )
-
-    closed = number(result["closed"])
-    wins = number(result["wins"])
+    closed = numeric(result["closed"])
+    wins = numeric(result["wins"])
 
     if closed is not None and wins is not None:
+        result["losses"] = int(
+            max(0, closed - wins)
+        )
 
-        losses = closed - wins
+        result["win_rate"] = (
+            round(wins / closed * 100, 2)
+            if closed > 0 else 0.0
+        )
 
-        result["losses"] = int(losses)
-
-        if closed > 0:
-            result["win_rate"] = round(
-                wins / closed * 100, 2
-            )
-        else:
-            result["win_rate"] = 0.0
+    result["notes"] = (
+        "Cumulative trade returns; "
+        "not account ROI"
+    )
 
     return result
 
 
-def make_row(scanner):
-
+def build_row(scanner):
     name = scanner["name"]
-    filename = scanner["file"]
+    filename = scanner["state"]
     kind = scanner["kind"]
-    symbol = scanner.get("symbol")
 
-    state, status = read_state(filename)
+    state, status = read_json(filename)
 
     if state is None:
         return [
@@ -339,30 +485,41 @@ def make_row(scanner):
             "State unavailable",
         ]
 
-    result = extract_results(
-        state,
-        kind,
-        symbol,
-    )
+    if kind == "asian":
+        result = asian_results(
+            state,
+            scanner["trades"]
+        )
+
+    elif kind == "gold":
+        result = gold_results(
+            state,
+            scanner["symbol"]
+        )
+
+    else:
+        result = standard_results(
+            state,
+            kind
+        )
 
     return [
         name,
         filename,
         status,
-        show(result["open"]),
-        show(result["legs"]),
-        show(result["closed"]),
-        show(result["wins"]),
-        show(result["losses"]),
-        show(result["win_rate"]),
-        show(result["net_pct"]),
-        show(result["net_usdt"]),
+        display(result["open"]),
+        display(result["legs"]),
+        display(result["closed"]),
+        display(result["wins"]),
+        display(result["losses"]),
+        display(result["win_rate"]),
+        display(result["net_pct"]),
+        display(result["net_usdt"]),
         result["notes"],
     ]
 
 
 def main():
-
     print("=" * 70)
     print("ALL SCANNERS MASTER PAPER RESULTS")
     print(
@@ -374,34 +531,28 @@ def main():
     rows = []
 
     for scanner in SCANNERS:
-        row = make_row(scanner)
+        row = build_row(scanner)
         rows.append(row)
 
-    with OUTPUT_FILE.open(
+    with OUTPUT.open(
         "w",
         newline="",
-        encoding="utf-8-sig",
+        encoding="utf-8-sig"
     ) as f:
-
         writer = csv.writer(f)
-
         writer.writerow(HEADERS)
         writer.writerows(rows)
 
     print(
         "Created:",
-        OUTPUT_FILE.name
-    )
-
-    print(
-        "Total scanner rows:",
+        OUTPUT.name,
+        "| Scanner rows:",
         len(rows)
     )
 
     print("-" * 70)
 
     for row in rows:
-
         print(
             f"{row[0]} | "
             f"Status={row[2]} | "
@@ -412,24 +563,15 @@ def main():
             f"Losses={row[7]} | "
             f"WinRate={row[8]}% | "
             f"NetReturn={row[9]}% | "
-            f"NetUSDT={row[10]}"
+            f"NetUSDT={row[10]} | "
+            f"Notes={row[11]}"
         )
 
     print("-" * 70)
-
-    print(
-        "N/A = data not available in state file."
-    )
-
-    print(
-        "Asian 2R/3R/4R legs are grouped "
-        "as one entry trade."
-    )
-
-    print(
-        "No real orders placed by this report."
-    )
-
+    print("N/A = source result not available.")
+    print("Asian 2R/3R/4R = one completed trade.")
+    print("Only fully closed Asian trades count.")
+    print("No real orders placed.")
     print("=" * 70)
 
 
