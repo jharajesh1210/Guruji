@@ -1,0 +1,2 @@
+trade_id,pair,direction,rr,entry_time,exit_time,entry,stop,target,exit,result,net_return_pct_per_leg
+B-XMR_USDT-2026-10-24T16:00:00+00:00-TRAIL-RR4,B-XMR_USDT,LONG,4,2026-10-24T16:00:00+00:00,2026-10-24T16:55:00+00:00,595.709118,589.72,619.6655899999998,607.5658165291999,TRAIL_SL,1.8904
