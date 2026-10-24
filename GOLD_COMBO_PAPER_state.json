@@ -1,6 +1,6 @@
 {
   "XAU": {
-    "last_bar": "2026-10-24T13:55:00+00:00",
+    "last_bar": "2026-10-24T14:15:00+00:00",
     "position": null,
     "closed_count": 0,
     "wins": 0,
@@ -9,8 +9,23 @@
     "equity": 1000.0
   },
   "PAXG": {
-    "last_bar": "2026-10-24T13:55:00+00:00",
-    "position": null,
+    "last_bar": "2026-10-24T14:15:00+00:00",
+    "position": {
+      "side": "SHORT",
+      "entry": 3993.61,
+      "sl": 3996.500995777077,
+      "initial_sl": 3996.500995777077,
+      "tp1": 3987.828008445846,
+      "tp2": 3984.937012668769,
+      "qty": 2.504000140224008,
+      "qty_left": 2.504000140224008,
+      "entry_bar": "2026-10-24T14:15:00+00:00",
+      "entry_time": "2026-10-24T14:15:00+00:00",
+      "tp1_hit": false,
+      "pnl": 0.0,
+      "bars": 0,
+      "equity_at_entry": 1000.0
+    },
     "closed_count": 0,
     "wins": 0,
     "net_pnl_usdt": 0.0,
