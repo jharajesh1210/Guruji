@@ -1,0 +1,20 @@
+{
+  "XAU": {
+    "last_bar": "2026-10-24T04:55:00+00:00",
+    "position": null,
+    "closed_count": 0,
+    "wins": 0,
+    "net_pnl_usdt": 0.0,
+    "net_return_sum_pct": 0.0,
+    "equity": 1000.0
+  },
+  "PAXG": {
+    "last_bar": "2026-10-24T04:55:00+00:00",
+    "position": null,
+    "closed_count": 0,
+    "wins": 0,
+    "net_pnl_usdt": 0.0,
+    "net_return_sum_pct": 0.0,
+    "equity": 1000.0
+  }
+}
