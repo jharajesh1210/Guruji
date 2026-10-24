@@ -1,4 +1,4 @@
-"""Build one honest six-scanner paper trading summary from GitHub state files.
+"""Build one honest seven-scanner paper trading summary from GitHub state files.
 Does not place orders or modify scanner state.
 """
 import csv
@@ -12,6 +12,7 @@ SCANNERS = [
     ("TOP100 NEWS IMPACT", "TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_state.json", "top100"),
     ("ASIAN LONDON NY NEWS IMPACT", "ASIAN_LONDON_NY_PAPER_NEWS_IMPACT_state.json", "asian"),
     ("BTC SMC NEWS IMPACT", "BTC_SMC_Paper_NEWS_IMPACT_state.json", "btc"),
+    ("TOP100 AMC POC V4 PAPER", "TOP100_CRIPTO_AMC_POC_V4_state.json", "top100"),
 ]
 
 HEADERS = ["Scanner", "State File", "Status", "Open Trades", "Closed Trades", "Wins", "Losses", "Net Return Sum (%)", "Notes"]
