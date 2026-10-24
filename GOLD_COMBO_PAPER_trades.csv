@@ -1,0 +1,2 @@
+symbol,side,entry_time,exit_time,entry,initial_sl,tp1,tp2,result,net_pnl_usdt,return_pct_of_equity
+PAXG,SHORT,2026-10-24T14:15:00+00:00,2026-10-24T14:20:00+00:00,3993.61,3996.500995777077,3987.828008445846,3984.937012668769,SL,-19.243397,-1.92434
