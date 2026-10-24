@@ -23,18 +23,27 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           python -m pip install pandas numpy requests
+
+      - name: Verify Python file
+        run: |
+          test -f BTC_LOSS_ANALYSIS.py
+          python -m py_compile BTC_LOSS_ANALYSIS.py
 
       - name: Run BTC historical analysis
         run: |
           python -u BTC_LOSS_ANALYSIS.py
 
-      - name: Upload analysis results
-        if: always()
+      - name: Verify BTC CSV
+        run: |
+          test -s BTC_23_OCT_5MIN.csv
+          echo "BTC historical CSV created successfully"
+
+      - name: Upload BTC 5-minute CSV
         uses: actions/upload-artifact@v4
         with:
-          name: BTC_LOSS_ANALYSIS_RESULTS
-          path: |
-            BTC_LOSS_ANALYSIS*.csv
-            BTC_LOSS_ANALYSIS*.json
-          if-no-files-found: warn
+          name: BTC_23_OCT_5MIN
+          path: BTC_23_OCT_5MIN.csv
+          if-no-files-found: error
+          retention-days: 30
