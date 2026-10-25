@@ -1,17 +1,21 @@
 {
-  "last_bar": 1792901100000,
-  "setup": {
-    "side": "SHORT",
-    "stage": "FVG",
-    "sweep_time": 1792898400000,
-    "extreme": 80999.9,
-    "break_level": 80864.5,
-    "choch_time": 1792899900000,
-    "fvg_low": 80863.5,
-    "fvg_high": 80886.6,
-    "fvg_time": 1792900200000
-  },
-  "positions": [],
+  "last_bar": 1792903500000,
+  "setup": null,
+  "positions": [
+    {
+      "side": "SHORT",
+      "rr": 4,
+      "entry": 80837.1,
+      "stop": 80999.9,
+      "initial_stop": 80999.9,
+      "initial_risk": 162.79999999998836,
+      "target": 80185.90000000005,
+      "entry_time": 1792902600000,
+      "trade_mode": "SINGLE_TRAIL_4R",
+      "max_rr_reached": 0,
+      "margin_usdt": 100.0
+    }
+  ],
   "closed": 0,
   "wins": 0,
   "losses": 0,
