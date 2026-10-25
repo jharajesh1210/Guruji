@@ -1,14 +1,88 @@
 {
-  "positions": [],
+  "positions": [
+    {
+      "symbol": "BTCUSDT",
+      "direction": "BUY",
+      "leg": "2R",
+      "entry": 80511.2,
+      "stop": 80340.4,
+      "initial_stop": 80340.4,
+      "target": 80852.8,
+      "risk": 170.8000000000029,
+      "entry_time_utc": "2026-10-25T15:20+00:00",
+      "last_checked_t": 1792941600000
+    },
+    {
+      "symbol": "BTCUSDT",
+      "direction": "BUY",
+      "leg": "3R",
+      "entry": 80511.2,
+      "stop": 80340.4,
+      "initial_stop": 80340.4,
+      "target": 81023.6,
+      "risk": 170.8000000000029,
+      "entry_time_utc": "2026-10-25T15:20+00:00",
+      "last_checked_t": 1792941600000
+    },
+    {
+      "symbol": "BTCUSDT",
+      "direction": "BUY",
+      "leg": "4R",
+      "entry": 80511.2,
+      "stop": 80340.4,
+      "initial_stop": 80340.4,
+      "target": 81194.40000000001,
+      "risk": 170.8000000000029,
+      "entry_time_utc": "2026-10-25T15:20+00:00",
+      "last_checked_t": 1792941600000
+    },
+    {
+      "symbol": "ETHUSDT",
+      "direction": "BUY",
+      "leg": "2R",
+      "entry": 2341.2,
+      "stop": 2334.63,
+      "initial_stop": 2334.63,
+      "target": 2354.3399999999992,
+      "risk": 6.569999999999709,
+      "entry_time_utc": "2026-10-25T15:30+00:00",
+      "last_checked_t": 1792942200000
+    },
+    {
+      "symbol": "ETHUSDT",
+      "direction": "BUY",
+      "leg": "3R",
+      "entry": 2341.2,
+      "stop": 2334.63,
+      "initial_stop": 2334.63,
+      "target": 2360.909999999999,
+      "risk": 6.569999999999709,
+      "entry_time_utc": "2026-10-25T15:30+00:00",
+      "last_checked_t": 1792942200000
+    },
+    {
+      "symbol": "ETHUSDT",
+      "direction": "BUY",
+      "leg": "4R",
+      "entry": 2341.2,
+      "stop": 2334.63,
+      "initial_stop": 2334.63,
+      "target": 2367.4799999999987,
+      "risk": 6.569999999999709,
+      "entry_time_utc": "2026-10-25T15:30+00:00",
+      "last_checked_t": 1792942200000
+    }
+  ],
   "entered_days": {
     "SOLUSDT": "2026-10-23",
     "BNBUSDT": "2026-10-23",
-    "BTCUSDT": "2026-10-24"
+    "BTCUSDT": "2026-10-25",
+    "ETHUSDT": "2026-10-25"
   },
   "last_closed_bar": {
-    "BTCUSDT": 1792940400000,
-    "ETHUSDT": 1792940400000,
-    "SOLUSDT": 1792940400000,
-    "BNBUSDT": 1792940400000
+    "BTCUSDT": 1792942500000,
+    "ETHUSDT": 1792942500000,
+    "SOLUSDT": 1792942500000,
+    "BNBUSDT": 1792942500000
   }
 }
