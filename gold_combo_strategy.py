@@ -77,7 +77,12 @@ class Cfg:
     asian: tuple = (0.0, 8.0)
     session_required: bool = True   # XAU me True, PAXG me False (auto set)
     # scoring
-    min_score: int = 2
+    min_score: int = 1              # XAU: session gate me hai, to score me alag se nahi gina jata
+    # v2 fixes (False/0 karne par purane rules wapas)
+    one_per_sweep: bool = True      # ek sweep par sirf pehla signal (SL ke turant baad re-entry nahi)
+    invalidate_sweep: bool = True   # sweep level ke paar close ho gaya -> setup fail, signal band
+    max_cost_r: float = 0.30        # round-trip fee+slip > 0.30R ho to trade skip (0 = off)
+    score_excl_gate_session: bool = True
     # bollinger squeeze
     bb_len: int = 20
     bb_sq_lookback: int = 100
@@ -262,9 +267,14 @@ def rolling_poc(df, window, bins, step=12):
 
 
 def htf(df, rule):
-    """Resample to higher TF. Index = bar CLOSE time (no look-ahead)."""
-    o = df.resample(rule, label="right", closed="right").agg(
+    """Resample to higher TF with correct bin edges (e.g. 1H = 09:00-09:55 candles).
+    Index = open-time of the LAST base candle inside the bar, i.e. the row whose close
+    coincides with the HTF close -> available exactly at that moment, no look-ahead.
+    (Purana code label=right/closed=right se bins ek candle shift kar deta tha.)"""
+    base = pd.Series(df.index).diff().median()
+    o = df.resample(rule, label="left", closed="left").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna()
+    o.index = o.index + pd.Timedelta(rule) - base
     return o
 
 
@@ -350,8 +360,16 @@ def build_signals(df: pd.DataFrame, cfg: Cfg, dxy=None, btc=None, xau=None) -> p
     sweep_high_5 = lvl5_s.ffill(limit=L)
 
     # combine: jo sweep level ZYADA aggressive (SL ke liye wide) ho wo lo
-    d["sweep_low"] = pd.concat([sweep_low_15, sweep_low_5], axis=1).min(axis=1)
-    d["sweep_high"] = pd.concat([sweep_high_15, sweep_high_5], axis=1).max(axis=1)
+    sw_low = pd.concat([sweep_low_15, sweep_low_5], axis=1).min(axis=1)
+    sw_high = pd.concat([sweep_high_15, sweep_high_5], axis=1).max(axis=1)
+    sid_l = (sw_low != sw_low.shift()).cumsum()       # har naya sweep = naya id
+    sid_s = (sw_high != sw_high.shift()).cumsum()
+    if cfg.invalidate_sweep:
+        # sweep extreme ke neeche (long) / upar (short) close ho gaya -> sweep fail, id ke baaki bars band
+        failed_l = (d["close"] < sw_low).astype(int).groupby(sid_l).cummax().astype(bool)
+        failed_s = (d["close"] > sw_high).astype(int).groupby(sid_s).cummax().astype(bool)
+        sw_low, sw_high = sw_low.where(~failed_l), sw_high.where(~failed_s)
+    d["sweep_low"], d["sweep_high"] = sw_low, sw_high
 
     # ---- Session
     h_s = pd.Series(hrs, index=idx)
@@ -386,9 +404,12 @@ def build_signals(df: pd.DataFrame, cfg: Cfg, dxy=None, btc=None, xau=None) -> p
     gate_s = base_ok & d["trend_dn"] & d["sweep_high"].notna() & trig_s
 
     # ---- SCORE
-    sc_l = d["session"].astype(int) + ((d["close"] > d["bb_up"].shift()) & recent_sq).astype(int) \
+    sess_pt = d["session"].astype(int)
+    if cfg.score_excl_gate_session and cfg.session_required:
+        sess_pt = sess_pt * 0          # session pehle se gate hai; score me dobara gin'na score ko bekaar bana deta tha
+    sc_l = sess_pt + ((d["close"] > d["bb_up"].shift()) & recent_sq).astype(int) \
         + (d["close"] > d["poc"]).astype(int) + (d["dxy_bias"] > 0).astype(int)
-    sc_s = d["session"].astype(int) + ((d["close"] < d["bb_dn"].shift()) & recent_sq).astype(int) \
+    sc_s = sess_pt + ((d["close"] < d["bb_dn"].shift()) & recent_sq).astype(int) \
         + (d["close"] < d["poc"]).astype(int) + (d["dxy_bias"] < 0).astype(int)
     if is_paxg:
         sc_l += (d["btc_bias"] > 0).astype(int) + (d["prem_z"] > 1).astype(int)
@@ -397,6 +418,9 @@ def build_signals(df: pd.DataFrame, cfg: Cfg, dxy=None, btc=None, xau=None) -> p
 
     d["long"] = gate_l & (sc_l >= cfg.min_score)
     d["short"] = gate_s & (sc_s >= cfg.min_score)
+    if cfg.one_per_sweep:   # ek sweep par sirf pehla valid bar; SL hit ke turant baad wahi setup dobara nahi
+        d["long"] = d["long"] & d["long"].astype(int).groupby(sid_l).cumsum().eq(1)
+        d["short"] = d["short"] & d["short"].astype(int).groupby(sid_s).cumsum().eq(1)
     return d
 
 
@@ -420,6 +444,8 @@ class Trade:
     reason: str = ""
     tp1_hit: bool = False
     qty_left: float = field(default=0.0)
+    fees: float = 0.0
+    tp1_i: int = -1
 
 
 def backtest(sig: pd.DataFrame, cfg: Cfg):
@@ -444,6 +470,7 @@ def backtest(sig: pd.DataFrame, cfg: Cfg):
         net = gross - fees
         eq += net
         t.pnl += net
+        t.fees += fees
 
     for i in range(1, len(sig)):
         # ---- manage open position on bar i
@@ -455,7 +482,8 @@ def backtest(sig: pd.DataFrame, cfg: Cfg):
             tp2_hit = (h[i] >= pos.tp2) if s == 1 else (l[i] <= pos.tp2)
             done = False
             if sl_hit:                                   # conservative: SL pehle
-                close_part(pos, pos.qty_left, pos.sl, idx[i])
+                gap_px = min(o[i], pos.sl) if s == 1 else max(o[i], pos.sl)   # gap par open par fill
+                close_part(pos, pos.qty_left, gap_px, idx[i])
                 pos.reason = "BE/SL" if pos.tp1_hit else "SL"
                 done = True
             else:
@@ -464,8 +492,9 @@ def backtest(sig: pd.DataFrame, cfg: Cfg):
                     close_part(pos, q, pos.tp1, idx[i])
                     pos.qty_left -= q
                     pos.tp1_hit = True
+                    pos.tp1_i = i
                     pos.sl = pos.entry                    # breakeven
-                if pos.tp1_hit and tp2_hit:
+                if pos.tp1_hit and pos.tp1_i < i and tp2_hit:   # TP2 sirf TP1 ke agle bar se (same-bar dono nahi)
                     close_part(pos, pos.qty_left, pos.tp2, idx[i])
                     pos.reason, done = "TP2", True
                 elif bars_in >= cfg.max_bars_in_trade:
@@ -479,14 +508,15 @@ def backtest(sig: pd.DataFrame, cfg: Cfg):
         # ---- new entry: signal bar i-1 close -> entry at open[i]
         if pos is None and not np.isnan(a[i - 1]) and (lg[i - 1] or sh[i - 1]):
             side = 1 if lg[i - 1] else -1
-            entry = o[i] * (1 + side * cfg.slip_pct / 100)
+            entry = o[i]                       # slippage cost (fee+slip) me pehle se hai; double count nahi
             anchor = sl_low[i - 1] if side == 1 else sl_high[i - 1]
-            sl = anchor - side * cfg.sl_buffer_atr * a[i - 1]
-            dist = abs(entry - sl)
-            dist = min(max(dist, cfg.min_sl_atr * a[i - 1]), cfg.max_sl_atr * a[i - 1])
-            sl = entry - side * dist
-            qty = (eq * cfg.risk_pct / 100) / dist
-            qty = min(qty, eq * cfg.max_leverage / entry)
+            plan = plan_trade(entry, anchor, a[i - 1], side, cfg)
+            qty = 0.0
+            if plan is not None:
+                dist = plan[0]
+                sl = entry - side * dist
+                qty = (eq * cfg.risk_pct / 100) / dist
+                qty = min(qty, eq * cfg.max_leverage / entry)
             if qty > 0 and eq > 0:
                 pos = Trade(side, idx[i], entry, sl, entry + side * cfg.tp1_r * dist,
                             entry + side * cfg.tp2_r * dist, qty, eq * cfg.risk_pct / 100,
@@ -495,6 +525,56 @@ def backtest(sig: pd.DataFrame, cfg: Cfg):
         curve.append(eq)
 
     return trades, pd.Series(curve, index=idx[1:])
+
+
+def plan_trade(entry: float, anchor: float, atr_v: float, side: int, cfg: Cfg):
+    """SL distance + cost-in-R. None = trade skip (fee/slip risk ke muqable bahut bada).
+    round-trip cost (R me) = 2 * entry * cost / SL_distance."""
+    if not (entry > 0 and atr_v > 0) or np.isnan(anchor):
+        return None
+    sl = anchor - side * cfg.sl_buffer_atr * atr_v
+    dist = min(max(abs(entry - sl), cfg.min_sl_atr * atr_v), cfg.max_sl_atr * atr_v)
+    cost_r = 2 * entry * (cfg.fee_pct + cfg.slip_pct) / 100 / dist
+    if cfg.max_cost_r and cost_r > cfg.max_cost_r:
+        return None
+    return dist, cost_r
+
+
+def stats_row(trades: list[Trade], curve: pd.Series, cfg: Cfg) -> dict:
+    if not trades:
+        return dict(trades=0, win_pct=np.nan, pf=np.nan, netR=np.nan, grossR=np.nan, net_pct=0.0, maxDD_pct=0.0)
+    pnl = np.array([t.pnl for t in trades])
+    risk = np.array([t.risk for t in trades])
+    fees = np.array([t.fees for t in trades])
+    gp, gl = pnl[pnl > 0].sum(), -pnl[pnl < 0].sum()
+    return dict(trades=len(trades), win_pct=(pnl > 0).mean() * 100, pf=(gp / gl if gl > 0 else np.inf),
+                netR=(pnl / risk).mean(), grossR=((pnl + fees) / risk).mean(),
+                net_pct=pnl.sum() / cfg.start_equity * 100, maxDD_pct=(curve / curve.cummax() - 1).min() * 100)
+
+
+def compare(df, cfg, dxy=None, btc=None, xau=None, oos_frac=0.4):
+    """Same data par purane rules vs v2 variants; ALL + last-40% (OOS) alag. grossR = fees se pehle."""
+    import dataclasses
+    variants = {
+        "old-rules": dict(one_per_sweep=False, invalidate_sweep=False, max_cost_r=0.0,
+                          score_excl_gate_session=False, min_score=2),
+        "v2 no-cost-filter": dict(max_cost_r=0.0),
+        "v2 default": dict(),
+        "v2 wide-SL(min1ATR)": dict(min_sl_atr=1.0),
+        "v2 TP1=1.5R": dict(tp1_r=1.5),
+    }
+    split = int(len(df) * (1 - oos_frac))
+    rows = []
+    for name, kw in variants.items():
+        c = dataclasses.replace(cfg, **kw)
+        sig = build_signals(df, c, dxy=dxy, btc=btc, xau=xau)
+        for part, s in (("ALL", sig), ("OOS", sig.iloc[split:])):
+            tr, cv = backtest(s, c)
+            rows.append({"variant": name, "part": part, **stats_row(tr, cv, c)})
+    print(f"\n===== {cfg.symbol} COMPARE  (OOS = last {int(oos_frac * 100)}% of data) =====")
+    print(pd.DataFrame(rows).round(2).to_string(index=False))
+    print("\ngrossR > 0 lekin netR < 0  => edge hai par fees kha rahi hain (stop bahut chhota / entry-exit taker).")
+    print("grossR <= 0                 => signal logic me hi edge nahi.  100+ trades se kam par bharosa mat karo.")
 
 
 def report(trades: list[Trade], curve: pd.Series, cfg: Cfg):
@@ -510,7 +590,8 @@ def report(trades: list[Trade], curve: pd.Series, cfg: Cfg):
     print(f"Trades        : {len(trades)}  (Long {sum(t.side == 1 for t in trades)} / Short {sum(t.side == -1 for t in trades)})")
     print(f"Win rate      : {wins.mean() * 100:.1f}%")
     print(f"Profit factor : {gp / gl:.2f}" if gl > 0 else "Profit factor : inf")
-    print(f"Avg R / trade : {r.mean():.2f}R   (expectancy)")
+    rg = np.array([(t.pnl + t.fees) / t.risk for t in trades])
+    print(f"Avg R / trade : {r.mean():.2f}R net   |   {rg.mean():.2f}R gross (fees se pehle)   |   fee+slip {rg.mean() - r.mean():.2f}R/trade")
     print(f"Net PnL       : {pnl.sum():.2f} USDT  ({pnl.sum() / cfg.start_equity * 100:.1f}%)")
     print(f"Max drawdown  : {dd:.1f}%")
     print(f"Final equity  : {curve.iloc[-1]:.2f}")
@@ -542,12 +623,15 @@ def scan(sig: pd.DataFrame, cfg: Cfg):
     if last["long"] or last["short"]:
         side = 1 if last["long"] else -1
         anchor = last["sweep_low"] if side == 1 else last["sweep_high"]
-        sl = anchor - side * cfg.sl_buffer_atr * last["atr"]
         entry = last["close"]
-        dist = min(max(abs(entry - sl), cfg.min_sl_atr * last["atr"]), cfg.max_sl_atr * last["atr"])
+        plan = plan_trade(entry, anchor, last["atr"], side, cfg)
+        if plan is None:
+            print("\n--- Signal bana par SKIP: fee+slip stop distance ke muqable bahut bada (max_cost_r). ---")
+            return
+        dist, cost_r = plan
         sl = entry - side * dist
         print(f"\n>>> SIGNAL: {'LONG' if side == 1 else 'SHORT'}  entry~{entry:.2f}  SL {sl:.2f}  "
-              f"TP1 {entry + side * cfg.tp1_r * dist:.2f}  TP2 {entry + side * cfg.tp2_r * dist:.2f}")
+              f"TP1 {entry + side * cfg.tp1_r * dist:.2f}  TP2 {entry + side * cfg.tp2_r * dist:.2f}  (cost {cost_r:.2f}R)")
     else:
         print("\n--- Abhi koi setup nahi. Wait karo. ---")
 
@@ -566,7 +650,7 @@ def get_df(args):
 
 def main():
     p = argparse.ArgumentParser(description="Gold combo strategy (XAU/PAXG)")
-    p.add_argument("mode", choices=["backtest", "scan", "demo"])
+    p.add_argument("mode", choices=["backtest", "scan", "demo", "compare"])
     p.add_argument("--symbol", default="XAU", choices=["XAU", "PAXG"])
     p.add_argument("--csv")
     p.add_argument("--fetch", action="store_true")
@@ -574,6 +658,9 @@ def main():
     p.add_argument("--dxy"), p.add_argument("--btc"), p.add_argument("--xau")
     p.add_argument("--min-score", type=int)
     p.add_argument("--risk", type=float)
+    p.add_argument("--fee", type=float, help="fee %% per side (default 0.05 taker)")
+    p.add_argument("--slip", type=float, help="slippage %% per side (default 0.01)")
+    p.add_argument("--max-cost-r", type=float, help="round-trip cost > X R to trade skip (0 = off)")
     p.add_argument("--save-trades")
     a = p.parse_args()
 
@@ -582,6 +669,12 @@ def main():
         cfg.min_score = a.min_score
     if a.risk is not None:
         cfg.risk_pct = a.risk
+    if a.fee is not None:
+        cfg.fee_pct = a.fee
+    if a.slip is not None:
+        cfg.slip_pct = a.slip
+    if a.max_cost_r is not None:
+        cfg.max_cost_r = a.max_cost_r
 
     if a.mode == "demo":
         df = synthetic()
@@ -590,6 +683,9 @@ def main():
         df = get_df(a)
 
     ext = lambda f: load_csv(f) if f else None
+    if a.mode == "compare":
+        compare(df, cfg, dxy=ext(a.dxy), btc=ext(a.btc), xau=ext(a.xau))
+        return
     sig = build_signals(df, cfg, dxy=ext(a.dxy), btc=ext(a.btc), xau=ext(a.xau))
 
     if a.mode == "scan":
