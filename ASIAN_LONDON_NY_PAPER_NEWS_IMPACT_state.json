@@ -10,7 +10,7 @@
       "target": 80852.8,
       "risk": 170.8000000000029,
       "entry_time_utc": "2026-10-25T15:20+00:00",
-      "last_checked_t": 1792941600000
+      "last_checked_t": 1792943400000
     },
     {
       "symbol": "BTCUSDT",
@@ -22,7 +22,7 @@
       "target": 81023.6,
       "risk": 170.8000000000029,
       "entry_time_utc": "2026-10-25T15:20+00:00",
-      "last_checked_t": 1792941600000
+      "last_checked_t": 1792943400000
     },
     {
       "symbol": "BTCUSDT",
@@ -34,18 +34,55 @@
       "target": 81194.40000000001,
       "risk": 170.8000000000029,
       "entry_time_utc": "2026-10-25T15:20+00:00",
-      "last_checked_t": 1792941600000
+      "last_checked_t": 1792943400000
+    },
+    {
+      "symbol": "ETHUSDT",
+      "direction": "BUY",
+      "leg": "2R",
+      "entry": 2345.26,
+      "stop": 2333.42,
+      "initial_stop": 2333.42,
+      "target": 2368.9400000000005,
+      "risk": 11.840000000000146,
+      "entry_time_utc": "2026-10-25T15:45+00:00",
+      "last_checked_t": 1792943100000
+    },
+    {
+      "symbol": "ETHUSDT",
+      "direction": "BUY",
+      "leg": "3R",
+      "entry": 2345.26,
+      "stop": 2333.42,
+      "initial_stop": 2333.42,
+      "target": 2380.7800000000007,
+      "risk": 11.840000000000146,
+      "entry_time_utc": "2026-10-25T15:45+00:00",
+      "last_checked_t": 1792943100000
+    },
+    {
+      "symbol": "ETHUSDT",
+      "direction": "BUY",
+      "leg": "4R",
+      "entry": 2345.26,
+      "stop": 2333.42,
+      "initial_stop": 2333.42,
+      "target": 2392.620000000001,
+      "risk": 11.840000000000146,
+      "entry_time_utc": "2026-10-25T15:45+00:00",
+      "last_checked_t": 1792943100000
     }
   ],
   "entered_days": {
     "SOLUSDT": "2026-10-23",
     "BNBUSDT": "2026-10-23",
-    "BTCUSDT": "2026-10-25"
+    "BTCUSDT": "2026-10-25",
+    "ETHUSDT": "2026-10-25"
   },
   "last_closed_bar": {
-    "BTCUSDT": 1792941600000,
-    "ETHUSDT": 1792941600000,
-    "SOLUSDT": 1792941600000,
-    "BNBUSDT": 1792941600000
+    "BTCUSDT": 1792943400000,
+    "ETHUSDT": 1792943400000,
+    "SOLUSDT": 1792943400000,
+    "BNBUSDT": 1792943400000
   }
 }
