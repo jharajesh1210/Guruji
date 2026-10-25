@@ -1,0 +1,2 @@
+time_utc,side,rr,entry,stop,target,exit,reason,gross_pct,net_pct,margin_usdt,trade_mode,max_rr_reached
+2026-10-25T05:50:00+00:00,SHORT,4,80837.1,80511.50000000003,80185.90000000005,80511.50000000003,TRAIL STOP,0.4028,0.2628,100.0,SINGLE_TRAIL_4R,2
