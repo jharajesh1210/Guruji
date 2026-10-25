@@ -17,31 +17,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy yfinance
+          python -m pip install pandas numpy yfinance
 
-      - name: Check Python script
+      - name: Check Python Script
         run: |
-          test -f RIL_TRADING_SYSTEM.py
-          python -m py_compile RIL_TRADING_SYSTEM.py
+          test -f RIL_TRADING_SYSTEM.PY
+          python -m py_compile RIL_TRADING_SYSTEM.PY
 
-      - name: Run real 5-minute Yahoo backtest
+      - name: Run RELIANCE 5 Minute Backtest
         run: |
           set -o pipefail
-          python -u RIL_TRADING_SYSTEM.py --source yfinance --strategy all --days 59 | tee reliance_backtest_log.txt
+          python -u RIL_TRADING_SYSTEM.PY \
+            --source yfinance \
+            --strategy all \
+            --days 59 | tee reliance_backtest_log.txt
 
-      - name: Upload log
+      - name: Upload Backtest Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: RELIANCE_5MIN_BACKTEST_LOG
+          name: RELIANCE_5MIN_BACKTEST_RESULTS
           path: reliance_backtest_log.txt
           if-no-files-found: warn
           retention-days: 30
