@@ -9,52 +9,52 @@ permissions:
 
 jobs:
   gold-strategy:
-    name: Gold Strategy Backtest
+    name: Gold 1 Year Backtest
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pandas numpy requests
 
-      - name: Check strategy file
+      - name: Verify Strategy
         run: |
           test -f gold_combo_strategy.py
           python -m py_compile gold_combo_strategy.py
 
-      - name: XAU 90 Day Backtest
+      - name: XAUUSDT One Year Backtest
         run: |
           python gold_combo_strategy.py backtest \
             --symbol XAU \
             --fetch \
-            --days 90 \
-            --save-trades GOLD_XAU_90DAY_TRADES.csv
+            --days 365 \
+            --save-trades XAUUSDT_1YEAR_TRADES.csv
 
-      - name: PAXG 90 Day Backtest
+      - name: PAXGUSDT One Year Backtest
         run: |
           python gold_combo_strategy.py backtest \
             --symbol PAXG \
             --fetch \
-            --days 90 \
-            --save-trades GOLD_PAXG_90DAY_TRADES.csv
+            --days 365 \
+            --save-trades PAXGUSDT_1YEAR_TRADES.csv
 
-      - name: Upload Backtest Results
+      - name: Upload Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GOLD_STRATEGY_90DAY_RESULTS
+          name: GOLD_1YEAR_BACKTEST_RESULTS
           path: |
-            GOLD_XAU_90DAY_TRADES.csv
-            GOLD_PAXG_90DAY_TRADES.csv
+            XAUUSDT_1YEAR_TRADES.csv
+            PAXGUSDT_1YEAR_TRADES.csv
           if-no-files-found: warn
           retention-days: 30
