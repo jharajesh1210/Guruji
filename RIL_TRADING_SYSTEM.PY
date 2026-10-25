@@ -507,12 +507,29 @@ def main() -> None:
         df = fetch_yfinance()
         print("Yahoo Finance data load ho gaya.")
 
+    print(f"Data coverage: {df.index.min()} to {df.index.max()} | {len(df)} candles")
     names = list(STRATEGIES) if args.strategy == "all" else [args.strategy]
+    combined = []
+    trade_columns = ["date", "side", "entry_time", "exit_time", "entry", "exit",
+                     "initial_stop", "final_stop", "qty", "gross", "costs",
+                     "net", "r_multiple", "exit_reason"]
     for name in names:
         trades = run_backtest(df, name)
         print_summary(name, summarize(trades))
+        output = f"RELIANCE_{name.upper()}_TRADES.csv"
+        trades.reindex(columns=trade_columns).to_csv(output, index=False)
+        print(f"Trade report saved: {output} ({len(trades)} trades)")
+        if not trades.empty:
+            tagged = trades.copy()
+            tagged.insert(0, "strategy", name)
+            combined.append(tagged)
+
+    combined_columns = ["strategy"] + trade_columns
+    report = (pd.concat(combined, ignore_index=True) if combined
+              else pd.DataFrame(columns=combined_columns))
+    report.reindex(columns=combined_columns).to_csv("RELIANCE_ALL_TRADES.csv", index=False)
+    print(f"Combined trade report saved: RELIANCE_ALL_TRADES.csv ({len(report)} trades)")
 
 
 if __name__ == "__main__":
     main()
-
