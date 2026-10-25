@@ -3,26 +3,14 @@
     {
       "symbol": "BTCUSDT",
       "direction": "BUY",
-      "leg": "2R",
-      "entry": 80511.2,
-      "stop": 80340.4,
-      "initial_stop": 80340.4,
-      "target": 80852.8,
-      "risk": 170.8000000000029,
-      "entry_time_utc": "2026-10-25T15:20+00:00",
-      "last_checked_t": 1792947600000
-    },
-    {
-      "symbol": "BTCUSDT",
-      "direction": "BUY",
       "leg": "3R",
       "entry": 80511.2,
-      "stop": 80340.4,
+      "stop": 80682.0,
       "initial_stop": 80340.4,
       "target": 81023.6,
       "risk": 170.8000000000029,
       "entry_time_utc": "2026-10-25T15:20+00:00",
-      "last_checked_t": 1792947600000
+      "last_checked_t": 1792949400000
     },
     {
       "symbol": "BTCUSDT",
@@ -34,31 +22,19 @@
       "target": 81194.40000000001,
       "risk": 170.8000000000029,
       "entry_time_utc": "2026-10-25T15:20+00:00",
-      "last_checked_t": 1792947600000
-    },
-    {
-      "symbol": "ETHUSDT",
-      "direction": "BUY",
-      "leg": "3R",
-      "entry": 2341.2,
-      "stop": 2347.7699999999995,
-      "initial_stop": 2334.63,
-      "target": 2360.909999999999,
-      "risk": 6.569999999999709,
-      "entry_time_utc": "2026-10-25T15:30+00:00",
-      "last_checked_t": 1792947600000
+      "last_checked_t": 1792949400000
     },
     {
       "symbol": "ETHUSDT",
       "direction": "BUY",
       "leg": "4R",
       "entry": 2341.2,
-      "stop": 2334.63,
+      "stop": 2354.3399999999992,
       "initial_stop": 2334.63,
       "target": 2367.4799999999987,
       "risk": 6.569999999999709,
       "entry_time_utc": "2026-10-25T15:30+00:00",
-      "last_checked_t": 1792947600000
+      "last_checked_t": 1792949400000
     }
   ],
   "entered_days": {
@@ -68,9 +44,9 @@
     "ETHUSDT": "2026-10-25"
   },
   "last_closed_bar": {
-    "BTCUSDT": 1792947600000,
-    "ETHUSDT": 1792947600000,
-    "SOLUSDT": 1792947600000,
-    "BNBUSDT": 1792947600000
+    "BTCUSDT": 1792949400000,
+    "ETHUSDT": 1792949400000,
+    "SOLUSDT": 1792949400000,
+    "BNBUSDT": 1792949400000
   }
 }
