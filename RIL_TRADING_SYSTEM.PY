@@ -339,47 +339,46 @@ def _clamp(px: float, lo: float, hi: float) -> float:
     return min(max(px, lo), hi)
 
 def _check_trailing_exit(pos: dict, o: float, h: float, l: float, minute: int, slip: float):
-    side = pos["side"]
+    """Conservative 5m OHLC execution: existing stops first; new trailing stops next bar.
 
+    OHLC cannot reveal whether high or low happened first. If the active stop and
+    the final target are both touched, assume the stop executed first.
+    A newly reached 2R/3R level raises the stop for the *next* candle only.
+    """
+    side = pos["side"]
+    stop = pos["stop"]
+
+    # Square off at the opening price of the 15:15 candle (not its close).
     if minute >= SQUARE_OFF_MIN:
         return _clamp(o * (1 - side * slip), l, h), "square_off"
 
-    # ------------------ LONG (BUY) CASH EXIT ------------------
     if side == 1:
-        if l <= pos["stop"]:
-            return _clamp(pos["stop"] * (1 - slip), l, h), pos["exit_reason"]
-
+        # Overnight / intrabar gap through an existing stop: fill at the worse
+        # of stop or open. Intrabar stop slippage is included.
+        if l <= stop:
+            base = min(o, stop)
+            return base * (1 - slip), pos["exit_reason"]
         if h >= pos["t_final"]:
-            return pos["t_final"], "target_1:4"
-
+            # Favorable gap may fill at open; otherwise assume target fill.
+            return max(o, pos["t_final"]), "target_1:4"
         if h >= pos["t_3"]:
-            pos["stop"] = max(pos["stop"], pos["t_3"])
+            pos["stop"] = max(stop, pos["t_3"])
             pos["exit_reason"] = "trail_sl_1:3"
         elif h >= pos["t_2"]:
-            pos["stop"] = max(pos["stop"], pos["t_2"])
+            pos["stop"] = max(stop, pos["t_2"])
             pos["exit_reason"] = "trail_sl_1:2"
-
-        if l <= pos["stop"]:
-            return _clamp(pos["stop"] * (1 - slip), l, h), pos["exit_reason"]
-
-    # ------------------ SHORT (SELL) CASH EXIT ------------------
     else:
-        if h >= pos["stop"]:
-            return _clamp(pos["stop"] * (1 + slip), l, h), pos["exit_reason"]
-
+        if h >= stop:
+            base = max(o, stop)
+            return base * (1 + slip), pos["exit_reason"]
         if l <= pos["t_final"]:
-            return pos["t_final"], "target_1:4"
-
+            return min(o, pos["t_final"]), "target_1:4"
         if l <= pos["t_3"]:
-            pos["stop"] = min(pos["stop"], pos["t_3"])
+            pos["stop"] = min(stop, pos["t_3"])
             pos["exit_reason"] = "trail_sl_1:3"
         elif l <= pos["t_2"]:
-            pos["stop"] = min(pos["stop"], pos["t_2"])
+            pos["stop"] = min(stop, pos["t_2"])
             pos["exit_reason"] = "trail_sl_1:2"
-
-        if h >= pos["stop"]:
-            return _clamp(pos["stop"] * (1 + slip), l, h), pos["exit_reason"]
-
     return None
 
 def _close_trade(pos: dict, exit_px: float, exit_time, reason: str) -> dict:
@@ -508,6 +507,7 @@ def main() -> None:
         print("Yahoo Finance data load ho gaya.")
 
     print(f"Data coverage: {df.index.min()} to {df.index.max()} | {len(df)} candles")
+    print("Execution: active stop first; 2R/3R trail effective from next candle; 4R target")
     names = list(STRATEGIES) if args.strategy == "all" else [args.strategy]
     combined = []
     trade_columns = ["date", "side", "entry_time", "exit_time", "entry", "exit",
