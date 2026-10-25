@@ -1,4 +1,3 @@
-
 name: RELIANCE 5MIN BACKTEST
 
 on:
@@ -35,16 +34,17 @@ jobs:
       - name: Run RELIANCE 5 Minute Backtest
         run: |
           set -o pipefail
-          python -u RIL_TRADING_SYSTEM.PY \
-            --source yfinance \
-            --strategy all \
-            --days 59 | tee reliance_backtest_log.txt
+          python -u RIL_TRADING_SYSTEM.PY --source yfinance --strategy all --days 59 | tee reliance_backtest_log.txt
 
       - name: Upload Backtest Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: RELIANCE_5MIN_BACKTEST_RESULTS
-          path: reliance_backtest_log.txt
+          path: |
+            reliance_backtest_log.txt
+            RELIANCE_ORB_TRADES.csv
+            RELIANCE_EMA_VWAP_TRADES.csv
+            RELIANCE_ALL_TRADES.csv
           if-no-files-found: warn
           retention-days: 30
