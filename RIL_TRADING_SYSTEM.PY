@@ -512,5 +512,7 @@ def main() -> None:
         trades = run_backtest(df, name)
         print_summary(name, summarize(trades))
 
-if __name__ == "main__":
+
+if __name__ == "__main__":
     main()
+
