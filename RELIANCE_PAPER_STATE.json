@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-26",
+  "equity": 100000.0,
+  "day_start_equity": 100000.0,
+  "day_pnl": 0.0,
+  "trades_today": 0,
+  "position": null,
+  "pending": null,
+  "last_processed": "2026-10-26T09:25:00+05:30",
+  "last_signal_bar": "",
+  "last_alert": ""
+}
