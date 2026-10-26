@@ -5,15 +5,17 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Select trading mode"
+        description: "Choose paper or backtest"
         required: true
-        default: "paper"
+        default: paper
         type: choice
         options:
           - paper
           - backtest
 
   schedule:
+    # Monday to Friday, UTC
+    # Python checks NSE market hours in IST
     - cron: "*/5 3-10 * * 1-5"
 
 permissions:
@@ -25,6 +27,7 @@ concurrency:
 
 jobs:
   reliance:
+    name: RELIANCE 5M SCANNER
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -39,17 +42,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Dependencies
+      - name: Install Requirements
         run: |
           python -m pip install --upgrade pip
           python -m pip install pandas numpy requests yfinance
 
-      - name: Check Python Script
+      - name: Check Python Code
         run: |
           test -f RIL_TRADING_SYSTEM.PY
           python -m py_compile RIL_TRADING_SYSTEM.PY
 
-      - name: Run RELIANCE Paper Trading
+      - name: Run RELIANCE Scanner
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -58,52 +61,53 @@ jobs:
           set -o pipefail
 
           if [ "$MODE" = "backtest" ]; then
+            echo "RUNNING RELIANCE BACKTEST"
+
             python -u RIL_TRADING_SYSTEM.PY \
               --mode backtest \
               --days 59 | tee RELIANCE_RUN_LOG.txt
           else
+            echo "RUNNING RELIANCE PAPER SCANNER"
+
             python -u RIL_TRADING_SYSTEM.PY \
               --mode paper | tee RELIANCE_RUN_LOG.txt
           fi
 
-      - name: Save Paper Trading State
-        if: >
-          success() &&
-          (github.event_name == 'schedule' ||
-          github.event.inputs.mode == 'paper')
+      - name: Save Paper State and Trade History
+        if: success() && (github.event_name == 'schedule' || github.event.inputs.mode == 'paper')
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          for f in \
+          for file in \
             RELIANCE_PAPER_STATE.json \
             RELIANCE_PAPER_TRADES.csv \
             RELIANCE_PAPER_EVENTS.csv
           do
-            if [ -f "$f" ]; then
-              git add -f "$f"
+            if [ -f "$file" ]; then
+              git add -f "$file"
             fi
           done
 
           if ! git diff --cached --quiet; then
-            git commit -m "Update RELIANCE paper state [skip ci]"
+            git commit -m "Update RELIANCE paper results [skip ci]"
             git push
           else
-            echo "No changes to save"
+            echo "No new paper results"
           fi
 
       - name: Upload Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: RELIANCE_PAPER_BACKTEST_REPORTS
+          name: RELIANCE_PAPER_AND_BACKTEST_REPORTS
           path: |
             RELIANCE_RUN_LOG.txt
             RELIANCE_PAPER_STATE.json
             RELIANCE_PAPER_TRADES.csv
             RELIANCE_PAPER_EVENTS.csv
-            RELIANCE_ORB_TRADES.csv
-            RELIANCE_EMA_VWAP_TRADES.csv
+            RELIANCE_ORB_VWAP_TRADES.csv
+            RELIANCE_RSI_BB_POC_TRADES.csv
             RELIANCE_ALL_TRADES.csv
           if-no-files-found: warn
           retention-days: 30
