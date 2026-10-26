@@ -1,13 +1,16 @@
 
-from __future__ import annotations
+#!/usr/bin/env python3
+# RIL_TRADING_SYSTEM.PY
+# RELIANCE NSE - 5 MINUTE COMBINED STRATEGY
+# RSI + BB + POC + VWAP + EMA + ORB
+# TRAILING SL: 1:2 -> 1:3 -> FINAL 1:4
+# FREE YAHOO DATA - PAPER TRADING ONLY
 
-import argparse
-import csv
-import json
 import os
-import time as time_module
-from datetime import datetime, time, timedelta
+import json
+import argparse
 from pathlib import Path
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -15,108 +18,500 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-# ============================================================
-# RELIANCE NSE 5-MINUTE PAPER TRADING + BACKTEST
-# NO REAL ORDERS ARE PLACED
-# ============================================================
 
 SYMBOL = "RELIANCE.NS"
 IST = ZoneInfo("Asia/Kolkata")
+
 CAPITAL = 100000.0
-RISK_PCT = 0.01
-DAILY_LOSS_LIMIT = 0.025
-MAX_TRADES_DAY = 3
-MAX_STOP_PCT = 0.01
-MIN_STOP_PCT = 0.0015
+RISK_PERCENT = 0.25
+MAX_TRADES_DAY = 2
+DAILY_LOSS_PERCENT = 0.5
 SLIPPAGE = 0.0002
-VOLUME_MULT = 1.0
-ATR_MULT = 1.5
 
-STATE_FILE = "RELIANCE_PAPER_STATE.json"
-PAPER_FILE = "RELIANCE_PAPER_TRADES.csv"
-EVENT_FILE = "RELIANCE_PAPER_EVENTS.csv"
+STATE_FILE = Path("RELIANCE_PAPER_STATE.json")
+PAPER_TRADES = Path("RELIANCE_PAPER_TRADES.csv")
+PAPER_EVENTS = Path("RELIANCE_PAPER_EVENTS.csv")
 
-TRADE_FIELDS = [
-    "strategy", "date", "side", "entry_time", "exit_time",
-    "entry", "exit", "initial_stop", "final_stop", "qty",
-    "gross", "costs", "net", "r_multiple", "exit_reason"
+ALL_TRADES = Path("RELIANCE_ALL_TRADES.csv")
+
+TRADE_COLUMNS = [
+    "strategy", "side", "entry_time", "exit_time",
+    "entry", "exit", "initial_sl", "final_sl",
+    "qty", "gross", "charges", "net",
+    "r_multiple", "reason"
 ]
 
-EVENT_FIELDS = [
-    "timestamp", "event", "side", "price", "qty",
-    "stop", "details"
+EVENT_COLUMNS = [
+    "timestamp", "event", "strategy",
+    "side", "price", "note"
 ]
 
 
-def now_ist():
-    return datetime.now(IST)
-
-
-def money(x):
-    return round(float(x), 2)
-
-
-def tick(x):
-    return round(round(float(x) / 0.05) * 0.05, 2)
-
-
-def append_csv(filename, fields, record):
-    path = Path(filename)
-    new = not path.exists() or path.stat().st_size == 0
-    with path.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
-        if new:
-            writer.writeheader()
-        writer.writerow({
-            key: record.get(key, "") for key in fields
-        })
-
-
-def save_json(filename, data):
-    temp = filename + ".tmp"
-    Path(temp).write_text(
-        json.dumps(data, indent=2, default=str),
-        encoding="utf-8"
-    )
-    os.replace(temp, filename)
-
+# ---------------------------------------
+# TELEGRAM
+# ---------------------------------------
 
 def telegram(message):
-    token = os.getenv("BOT_TOKEN", "")
-    chat = os.getenv("CHAT_ID", "")
+    print(message)
 
-    if not token or not chat:
-        print("TELEGRAM NOT CONFIGURED:", message)
+    token = os.getenv("BOT_TOKEN", "")
+    chat_id = os.getenv("CHAT_ID", "")
+
+    if not token or not chat_id:
+        print("Telegram secrets not configured")
         return
 
     try:
         response = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            data={"chat_id": chat, "text": message},
+            data={
+                "chat_id": chat_id,
+                "text": message
+            },
             timeout=15
         )
         response.raise_for_status()
-    except Exception as exc:
-        print("Telegram error:", exc)
+    except requests.RequestException as error:
+        print("Telegram error:", error)
 
 
-def event(kind, side="", price=0, qty=0, stop=0, details=""):
-    record = {
-        "timestamp": now_ist().isoformat(),
-        "event": kind,
-        "side": side,
-        "price": price,
-        "qty": qty,
-        "stop": stop,
-        "details": details
+def append_csv(path, row, columns):
+    pd.DataFrame([
+        {key: row.get(key, "") for key in columns}
+    ]).to_csv(
+        path,
+        mode="a",
+        header=not path.exists() or path.stat().st_size == 0,
+        index=False
+    )
+
+
+# ---------------------------------------
+# YAHOO FINANCE DATA
+# ---------------------------------------
+
+def download_data(days=7):
+
+    days = min(max(int(days), 2), 59)
+
+    df = yf.download(
+        SYMBOL,
+        period=f"{days}d",
+        interval="5m",
+        auto_adjust=False,
+        progress=False,
+        threads=False
+    )
+
+    if df.empty:
+        raise RuntimeError("Yahoo Finance data unavailable")
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    df.columns = [
+        str(c).strip().lower()
+        for c in df.columns
+    ]
+
+    df = df[
+        ["open", "high", "low", "close", "volume"]
+    ].dropna().copy()
+
+    if df.index.tz is None:
+        df.index = df.index.tz_localize(IST)
+    else:
+        df.index = df.index.tz_convert(IST)
+
+    df = df.sort_index()
+    df = df[~df.index.duplicated(keep="last")]
+
+    df = df[
+        (df.index.time >= time(9, 15)) &
+        (df.index.time < time(15, 30))
+    ]
+
+    return df
+
+
+# ---------------------------------------
+# APPROXIMATE VOLUME PROFILE
+# ---------------------------------------
+
+def volume_profile(day):
+
+    if len(day) < 15 or day.volume.sum() <= 0:
+        return None
+
+    low = float(day.low.min())
+    high = float(day.high.max())
+
+    if high <= low:
+        return None
+
+    edges = np.linspace(low, high, 41)
+
+    typical = (
+        day.high + day.low + day.close
+    ) / 3
+
+    histogram, _ = np.histogram(
+        typical,
+        bins=edges,
+        weights=day.volume
+    )
+
+    poc_index = int(np.argmax(histogram))
+
+    left = poc_index
+    right = poc_index
+
+    total = float(histogram[poc_index])
+    target = float(histogram.sum()) * 0.70
+
+    while total < target and (
+        left > 0 or right < len(histogram) - 1
+    ):
+
+        lower_volume = (
+            histogram[left - 1]
+            if left > 0 else -1
+        )
+
+        upper_volume = (
+            histogram[right + 1]
+            if right < len(histogram) - 1 else -1
+        )
+
+        if upper_volume >= lower_volume:
+            right += 1
+            total += histogram[right]
+        else:
+            left -= 1
+            total += histogram[left]
+
+    return {
+        "poc": float(
+            (edges[poc_index] + edges[poc_index + 1]) / 2
+        ),
+        "val": float(edges[left]),
+        "vah": float(edges[right + 1]),
+        "prev_low": low,
+        "prev_high": high
     }
-    append_csv(EVENT_FILE, EVENT_FIELDS, record)
-    print("EVENT:", record)
 
 
-def costs(entry, exit_price, qty, side):
-    buy = entry if side == "BUY" else exit_price
-    sell = exit_price if side == "BUY" else entry
+# ---------------------------------------
+# TECHNICAL INDICATORS
+# ---------------------------------------
+
+def add_indicators(df):
+
+    df = df.copy()
+
+    close = df.close
+    high = df.high
+    low = df.low
+    volume = df.volume
+
+    # RSI 14
+    delta = close.diff()
+
+    gain = delta.clip(lower=0).ewm(
+        alpha=1 / 14,
+        adjust=False,
+        min_periods=14
+    ).mean()
+
+    loss = (-delta.clip(upper=0)).ewm(
+        alpha=1 / 14,
+        adjust=False,
+        min_periods=14
+    ).mean()
+
+    rs = gain / loss.replace(0, np.nan)
+
+    df["rsi"] = 100 - 100 / (1 + rs)
+
+    df.loc[
+        (loss == 0) & (gain > 0), "rsi"
+    ] = 100
+
+    # Bollinger Bands
+    df["bb_mid"] = close.rolling(20).mean()
+
+    std = close.rolling(20).std(ddof=0)
+
+    df["bb_upper"] = df.bb_mid + 2 * std
+    df["bb_lower"] = df.bb_mid - 2 * std
+
+    # EMA
+    df["ema9"] = close.ewm(
+        span=9, adjust=False
+    ).mean()
+
+    df["ema21"] = close.ewm(
+        span=21, adjust=False
+    ).mean()
+
+    # ATR
+    previous_close = close.shift(1)
+
+    true_range = pd.concat([
+        high - low,
+        (high - previous_close).abs(),
+        (low - previous_close).abs()
+    ], axis=1).max(axis=1)
+
+    df["atr"] = true_range.ewm(
+        alpha=1 / 14,
+        adjust=False,
+        min_periods=14
+    ).mean()
+
+    # Previous 20 completed candles
+    df["vol_avg"] = (
+        volume.shift(1).rolling(20).mean()
+    )
+
+    # Daily VWAP
+    typical = (high + low + close) / 3
+
+    session = pd.Series(
+        df.index.date,
+        index=df.index
+    )
+
+    df["vwap"] = (
+        (typical * volume).groupby(session).cumsum()
+        /
+        volume.groupby(session).cumsum().replace(0, np.nan)
+    )
+
+    # Previous day profile
+    for col in [
+        "poc", "val", "vah",
+        "prev_low", "prev_high",
+        "orb_high", "orb_low"
+    ]:
+        df[col] = np.nan
+
+    groups = list(df.groupby(df.index.date))
+
+    for j, (_, day) in enumerate(groups):
+
+        opening = day[
+            (day.index.time >= time(9, 15)) &
+            (day.index.time < time(9, 30))
+        ]
+
+        if len(opening) == 3:
+
+            eligible = day[
+                day.index.time >= time(9, 30)
+            ].index
+
+            df.loc[eligible, "orb_high"] = (
+                opening.high.max()
+            )
+
+            df.loc[eligible, "orb_low"] = (
+                opening.low.min()
+            )
+
+        if j > 0:
+
+            levels = volume_profile(
+                groups[j - 1][1]
+            )
+
+            if levels:
+                for key, value in levels.items():
+                    df.loc[day.index, key] = value
+
+    return df
+
+
+# ---------------------------------------
+# COMBINED BUY / SELL STRATEGY
+# ---------------------------------------
+
+def get_signal(df, i):
+
+    if i < 25:
+        return None
+
+    row = df.iloc[i]
+    previous = df.iloc[i - 1]
+    ts = df.index[i]
+
+    if not (
+        time(9, 35) <= ts.time() < time(14, 20)
+    ):
+        return None
+
+    # Avoid lunch-time sideways period
+    if time(12, 0) <= ts.time() < time(13, 30):
+        return None
+
+    required = [
+        "rsi", "atr", "vol_avg",
+        "vwap", "bb_lower", "bb_upper"
+    ]
+
+    if any(
+        not np.isfinite(row[k])
+        for k in required
+    ):
+        return None
+
+    if row.vol_avg <= 0:
+        return None
+
+    high_volume = (
+        row.volume >= 1.5 * row.vol_avg
+    )
+
+    if not high_volume:
+        return None
+
+    # STRATEGY 1 + 2
+    # RSI + BB REJECTION + VOLUME PROFILE
+
+    for side in (1, -1):
+
+        if side == 1:
+
+            extreme = (
+                previous.rsi < 21
+                and previous.low <= previous.bb_lower
+            )
+
+            rejection = (
+                row.rsi > 21
+                and row.close > row.bb_lower
+                and row.close > row.open
+            )
+
+            levels = [
+                row.val, row.poc, row.prev_low
+            ]
+
+            stop = (
+                min(previous.low, row.low)
+                - 0.10 * row.atr
+            )
+
+        else:
+
+            extreme = (
+                previous.rsi > 85
+                and previous.high >= previous.bb_upper
+            )
+
+            rejection = (
+                row.rsi < 85
+                and row.close < row.bb_upper
+                and row.close < row.open
+            )
+
+            levels = [
+                row.vah, row.poc, row.prev_high
+            ]
+
+            stop = (
+                max(previous.high, row.high)
+                + 0.10 * row.atr
+            )
+
+        near_profile = any(
+            np.isfinite(level)
+            and row.low - 0.25 * row.atr
+            <= level
+            <= row.high + 0.25 * row.atr
+            for level in levels
+        )
+
+        if extreme and rejection and near_profile:
+
+            against_trend = (
+                (
+                    side == 1
+                    and row.ema9 < row.ema21
+                    and row.close < row.vwap
+                )
+                or
+                (
+                    side == -1
+                    and row.ema9 > row.ema21
+                    and row.close > row.vwap
+                )
+            )
+
+            if not against_trend:
+                return {
+                    "strategy": "RSI_BB_POC",
+                    "side": side,
+                    "stop": float(stop)
+                }
+
+    # STRATEGY 3 + 4
+    # ORB + VWAP + EMA + VOLUME
+
+    if not np.isfinite(row.orb_high):
+        return None
+
+    # ORB BUY
+    if (
+        previous.close <= row.orb_high
+        and row.close > row.orb_high
+        and row.close > row.vwap
+        and row.ema9 > row.ema21
+    ):
+
+        return {
+            "strategy": "ORB_VWAP",
+            "side": 1,
+            "stop": float(
+                max(
+                    row.close - 1.5 * row.atr,
+                    row.orb_low
+                )
+            )
+        }
+
+    # ORB SELL
+    if (
+        previous.close >= row.orb_low
+        and row.close < row.orb_low
+        and row.close < row.vwap
+        and row.ema9 < row.ema21
+    ):
+
+        return {
+            "strategy": "ORB_VWAP",
+            "side": -1,
+            "stop": float(
+                min(
+                    row.close + 1.5 * row.atr,
+                    row.orb_high
+                )
+            )
+        }
+
+    return None
+
+
+# ---------------------------------------
+# APPROXIMATE INTRADAY CHARGES
+# ---------------------------------------
+
+def charges(entry, exit_price, qty, side):
+
+    if side == 1:
+        buy, sell = entry, exit_price
+    else:
+        buy, sell = exit_price, entry
 
     turnover = (buy + sell) * qty
 
@@ -125,729 +520,640 @@ def costs(entry, exit_price, qty, side):
         + min(sell * qty * 0.0003, 20)
     )
 
-    stt = sell * qty * 0.00025
     exchange = turnover * 0.0000297
     sebi = turnover * 0.000001
+    stt = sell * qty * 0.00025
     stamp = buy * qty * 0.00003
-    gst = (brokerage + exchange + sebi) * 0.18
 
-    return money(
-        brokerage + stt + exchange + sebi + stamp + gst
+    gst = 0.18 * (
+        brokerage + exchange + sebi
+    )
+
+    return (
+        brokerage + exchange + sebi
+        + stt + stamp + gst
     )
 
 
-def download_data(days=7):
-    period = f"{min(int(days), 59)}d"
+# ---------------------------------------
+# PAPER ENTRY
+# ---------------------------------------
 
-    df = yf.download(
-        SYMBOL,
-        period=period,
-        interval="5m",
-        auto_adjust=False,
-        progress=False,
-        threads=False
+def create_position(signal, price, ts, equity):
+
+    side = signal["side"]
+
+    entry = float(price) * (
+        1 + side * SLIPPAGE
     )
 
-    if df.empty:
-        raise RuntimeError("Yahoo Finance returned no data")
+    stop = float(signal["stop"])
 
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+    risk = (entry - stop) * side
 
-    df.columns = [str(c).lower() for c in df.columns]
+    if risk <= 0:
+        return None
 
-    df = df[["open", "high", "low", "close", "volume"]]
-    df = df.dropna().copy()
+    if not 0.0015 <= risk / entry <= 0.01:
+        return None
 
-    if df.index.tz is None:
-        df.index = df.index.tz_localize(IST)
-    else:
-        df.index = df.index.tz_convert(IST)
-
-    df = df[
-        (df.index.time >= time(9, 15))
-        & (df.index.time < time(15, 30))
-    ]
-
-    df = df[~df.index.duplicated(keep="last")]
-    return df.sort_index()
-
-
-def add_indicators(df):
-    df = df.copy()
-
-    df["ema9"] = df.close.ewm(
-        span=9, adjust=False
-    ).mean()
-
-    df["ema21"] = df.close.ewm(
-        span=21, adjust=False
-    ).mean()
-
-    prev_close = df.close.shift(1)
-
-    tr = pd.concat([
-        df.high - df.low,
-        (df.high - prev_close).abs(),
-        (df.low - prev_close).abs()
-    ], axis=1).max(axis=1)
-
-    df["atr"] = tr.ewm(
-        alpha=1 / 14, adjust=False
-    ).mean()
-
-    df["vol_ma"] = df.volume.rolling(
-        20, min_periods=10
-    ).mean()
-
-    dates = pd.Series(
-        df.index.date, index=df.index
+    risk_budget = (
+        equity * RISK_PERCENT / 100
     )
 
-    typical = (df.high + df.low + df.close) / 3
-    cumulative_pv = (typical * df.volume).groupby(
-        dates
-    ).cumsum()
-
-    cumulative_vol = df.volume.groupby(
-        dates
-    ).cumsum()
-
-    df["vwap"] = cumulative_pv / cumulative_vol.replace(
-        0, np.nan
+    qty = min(
+        int(risk_budget / risk),
+        int(equity / entry)
     )
-
-    df["orb_high"] = np.nan
-    df["orb_low"] = np.nan
-
-    for day, part in df.groupby(df.index.date):
-        opening = part[
-            (part.index.time >= time(9, 15))
-            & (part.index.time < time(9, 30))
-        ]
-
-        if len(opening) < 3:
-            continue
-
-        df.loc[part.index, "orb_high"] = opening.high.max()
-        df.loc[part.index, "orb_low"] = opening.low.min()
-
-    return df
-
-
-def signal(df, i, strategy="orb"):
-    if i < 22:
-        return None
-
-    row = df.iloc[i]
-    prev = df.iloc[i - 1]
-    ts = df.index[i]
-    tm = ts.time()
-
-    if tm < time(9, 30) or tm >= time(14, 30):
-        return None
-
-    if time(12, 0) <= tm < time(13, 30):
-        return None
-
-    if not np.isfinite(row.atr):
-        return None
-
-    if not np.isfinite(row.vol_ma):
-        return None
-
-    if row.volume < row.vol_ma * VOLUME_MULT:
-        return None
-
-    if strategy == "orb":
-        if not np.isfinite(row.orb_high):
-            return None
-
-        long_ok = (
-            prev.close <= row.orb_high
-            and row.close > row.orb_high
-            and row.close > row.vwap
-            and row.ema9 > row.ema21
-        )
-
-        short_ok = (
-            prev.close >= row.orb_low
-            and row.close < row.orb_low
-            and row.close < row.vwap
-            and row.ema9 < row.ema21
-        )
-
-    else:
-        long_ok = (
-            prev.ema9 <= prev.ema21
-            and row.ema9 > row.ema21
-            and row.close > row.vwap
-        )
-
-        short_ok = (
-            prev.ema9 >= prev.ema21
-            and row.ema9 < row.ema21
-            and row.close < row.vwap
-        )
-
-    if not long_ok and not short_ok:
-        return None
-
-    side = "BUY" if long_ok else "SELL"
-    return {
-        "side": side,
-        "atr": float(row.atr),
-        "orb_high": float(row.orb_high)
-            if np.isfinite(row.orb_high) else None,
-        "orb_low": float(row.orb_low)
-            if np.isfinite(row.orb_low) else None,
-        "strategy": strategy.upper()
-    }
-
-
-def new_position(sig, price, timestamp, equity):
-    side = sig["side"]
-    entry = price * (
-        1 + SLIPPAGE if side == "BUY" else 1 - SLIPPAGE
-    )
-    entry = tick(entry)
-
-    atr_distance = sig["atr"] * ATR_MULT
-
-    if sig["strategy"] == "ORB":
-        if side == "BUY":
-            orb_stop = sig["orb_low"]
-            distance = min(
-                entry - orb_stop, atr_distance
-            )
-        else:
-            orb_stop = sig["orb_high"]
-            distance = min(
-                orb_stop - entry, atr_distance
-            )
-    else:
-        distance = atr_distance
-
-    if distance <= 0:
-        return None
-
-    stop_pct = distance / entry
-
-    if not MIN_STOP_PCT <= stop_pct <= MAX_STOP_PCT:
-        return None
-
-    stop = tick(
-        entry - distance if side == "BUY"
-        else entry + distance
-    )
-
-    risk_per_share = abs(entry - stop)
-
-    if risk_per_share <= 0:
-        return None
-
-    risk_qty = int(
-        equity * RISK_PCT / risk_per_share
-    )
-
-    cash_qty = int(equity / entry)
-    qty = min(risk_qty, cash_qty)
 
     if qty < 1:
         return None
 
     return {
-        "strategy": sig["strategy"],
+        "strategy": signal["strategy"],
         "side": side,
-        "entry_time": timestamp.isoformat(),
         "entry": entry,
+        "entry_time": ts.isoformat(),
         "initial_stop": stop,
         "stop": stop,
+        "risk": risk,
         "qty": qty,
-        "risk": risk_per_share,
-        "stage": 0,
-        "last_bar": "",
+        "stage": 0
     }
 
 
-def exit_position(pos, exit_price, timestamp, reason):
+# ---------------------------------------
+# 1:2 -> 1:3 -> 1:4 TRAILING SL
+# ---------------------------------------
+
+def manage_position(pos, candle, ts):
+
     side = pos["side"]
-    direction = 1 if side == "BUY" else -1
-
-    entry = pos["entry"]
-    qty = pos["qty"]
-
-    gross = (
-        exit_price - entry
-    ) * direction * qty
-
-    charges = costs(entry, exit_price, qty, side)
-    net = gross - charges
-
-    record = {
-        "strategy": pos["strategy"],
-        "date": timestamp.date().isoformat(),
-        "side": side,
-        "entry_time": pos["entry_time"],
-        "exit_time": timestamp.isoformat(),
-        "entry": entry,
-        "exit": tick(exit_price),
-        "initial_stop": pos["initial_stop"],
-        "final_stop": pos["stop"],
-        "qty": qty,
-        "gross": money(gross),
-        "costs": charges,
-        "net": money(net),
-        "r_multiple": round(
-            net / (pos["risk"] * qty), 4
-        ),
-        "exit_reason": reason
-    }
-
-    return record
-
-
-def manage_position(pos, bar, timestamp):
-    side = pos["side"]
-    direction = 1 if side == "BUY" else -1
-
     entry = pos["entry"]
     risk = pos["risk"]
+
     stop = pos["stop"]
 
-    high = float(bar.high)
-    low = float(bar.low)
-    opening = float(bar.open)
-    closing = float(bar.close)
-
-    target2 = entry + direction * risk * 2
-    target3 = entry + direction * risk * 3
-    target4 = entry + direction * risk * 4
-
-    # Existing stop is checked BEFORE raising the stop.
-    # This avoids using a newly raised stop on the same candle.
-
-    if side == "BUY":
-        stop_hit = low <= stop
-        final_hit = high >= target4
-    else:
-        stop_hit = high >= stop
-        final_hit = low <= target4
+    # Check previously active SL first.
+    # Same-candle ordering is unknown.
+    stop_hit = (
+        candle.low <= stop
+        if side == 1
+        else candle.high >= stop
+    )
 
     if stop_hit:
-        if side == "BUY":
-            fill = min(opening, stop)
-            fill *= 1 - SLIPPAGE
+
+        if side == 1:
+            price = min(candle.open, stop)
         else:
-            fill = max(opening, stop)
-            fill *= 1 + SLIPPAGE
+            price = max(candle.open, stop)
+
+        price *= 1 - side * SLIPPAGE
 
         reason = (
-            "stop_loss" if pos["stage"] == 0
-            else f"trail_sl_1:{pos['stage'] + 1}"
+            "INITIAL_SL"
+            if pos["stage"] == 0
+            else "TRAILING_SL"
         )
 
-        return tick(fill), reason
+        return float(price), reason
 
-    if final_hit:
-        fill = target4 * (
-            1 - SLIPPAGE if side == "BUY"
-            else 1 + SLIPPAGE
+    # FINAL TARGET 1:4
+    target4 = entry + side * 4 * risk
+
+    hit4 = (
+        candle.high >= target4
+        if side == 1
+        else candle.low <= target4
+    )
+
+    if hit4:
+        return (
+            target4 * (1 - side * SLIPPAGE),
+            "TARGET_1_4"
         )
-        return tick(fill), "target_1:4"
 
-    # EOD exit: 15:15 candle OPEN is not known until 15:15.
-    # This function processes a completed candle, so use close.
-    if timestamp.time() >= time(15, 10):
-        fill = closing * (
-            1 - SLIPPAGE if side == "BUY"
-            else 1 + SLIPPAGE
+    # Square off near 15:15
+    if ts.time() >= time(15, 10):
+        return (
+            float(candle.close)
+            * (1 - side * SLIPPAGE),
+            "SQUARE_OFF"
         )
-        return tick(fill), "square_off"
 
-    # Newly trailed stop becomes effective on NEXT candle.
-    if side == "BUY":
-        hit3 = high >= target3
-        hit2 = high >= target2
-    else:
-        hit3 = low <= target3
-        hit2 = low <= target2
+    target2 = entry + side * 2 * risk
+    target3 = entry + side * 3 * risk
 
+    hit2 = (
+        candle.high >= target2
+        if side == 1
+        else candle.low <= target2
+    )
+
+    hit3 = (
+        candle.high >= target3
+        if side == 1
+        else candle.low <= target3
+    )
+
+    # Updated SL becomes active from next candle.
     if hit3:
-        pos["stop"] = tick(target3)
         pos["stage"] = 2
+        pos["stop"] = target3
+
     elif hit2 and pos["stage"] < 1:
-        pos["stop"] = tick(target2)
         pos["stage"] = 1
+        pos["stop"] = target2
 
     return None
 
 
-def default_state(day):
+# ---------------------------------------
+# CLOSE TRADE AND PROFIT
+# ---------------------------------------
+
+def close_trade(pos, exit_price, ts, reason):
+
+    side = pos["side"]
+    qty = pos["qty"]
+
+    gross = (
+        (exit_price - pos["entry"])
+        * side * qty
+    )
+
+    fee = charges(
+        pos["entry"],
+        exit_price,
+        qty,
+        side
+    )
+
+    net = gross - fee
+
     return {
-        "date": day,
+        "strategy": pos["strategy"],
+        "side": "BUY" if side == 1 else "SELL",
+        "entry_time": pos["entry_time"],
+        "exit_time": ts.isoformat(),
+        "entry": round(pos["entry"], 2),
+        "exit": round(exit_price, 2),
+        "initial_sl": round(pos["initial_stop"], 2),
+        "final_sl": round(pos["stop"], 2),
+        "qty": qty,
+        "gross": round(gross, 2),
+        "charges": round(fee, 2),
+        "net": round(net, 2),
+        "r_multiple": round(
+            net / (pos["risk"] * qty), 3
+        ),
+        "reason": reason
+    }
+
+
+# ---------------------------------------
+# PAPER STATE
+# ---------------------------------------
+
+def new_state():
+
+    return {
         "equity": CAPITAL,
-        "day_start_equity": CAPITAL,
+        "day": "",
+        "day_start": CAPITAL,
         "day_pnl": 0.0,
         "trades_today": 0,
         "position": None,
         "pending": None,
-        "last_processed": "",
-        "last_signal_bar": "",
-        "last_alert": ""
+        "last_bar": ""
     }
 
 
-def load_state(day):
-    if Path(STATE_FILE).exists():
-        try:
-            state = json.loads(
-                Path(STATE_FILE).read_text(
-                    encoding="utf-8"
+# ---------------------------------------
+# HISTORICAL BACKTEST
+# ---------------------------------------
+
+def backtest(df):
+
+    state = new_state()
+    records = []
+
+    for i in range(len(df)):
+
+        ts = df.index[i]
+        candle = df.iloc[i]
+        day = ts.date().isoformat()
+
+        if state["day"] != day:
+
+            if state["position"]:
+
+                previous = df.iloc[i - 1]
+                previous_ts = df.index[i - 1]
+
+                pos = state["position"]
+
+                price = float(previous.close) * (
+                    1 - pos["side"] * SLIPPAGE
                 )
-            )
-        except Exception:
-            state = default_state(day)
-    else:
-        state = default_state(day)
 
-    if state.get("date") != day:
-        old_equity = float(
-            state.get("equity", CAPITAL)
-        )
-        old_position = state.get("position")
+                record = close_trade(
+                    pos, price, previous_ts, "EOD"
+                )
 
-        state = default_state(day)
-        state["equity"] = old_equity
-        state["day_start_equity"] = old_equity
+                records.append(record)
+                state["equity"] += record["net"]
+                state["position"] = None
 
-        # Do not silently discard an overnight position.
-        if old_position:
-            state["position"] = old_position
+            state["day"] = day
+            state["day_start"] = state["equity"]
+            state["day_pnl"] = 0.0
+            state["trades_today"] = 0
+            state["pending"] = None
 
-    return state
+        # Manage existing position
+        if state["position"]:
 
-
-def record_exit(state, pos, price, ts, reason, paper=True):
-    record = exit_position(
-        pos, price, ts, reason
-    )
-
-    state["equity"] = money(
-        state["equity"] + record["net"]
-    )
-    state["day_pnl"] = money(
-        state["day_pnl"] + record["net"]
-    )
-    state["position"] = None
-
-    if paper:
-        append_csv(
-            PAPER_FILE, TRADE_FIELDS, record
-        )
-        event(
-            "EXIT", pos["side"], price,
-            pos["qty"], pos["stop"], reason
-        )
-        telegram(
-            "RELIANCE PAPER EXIT\n"
-            f"Side: {pos['side']}\n"
-            f"Exit: {price}\n"
-            f"Reason: {reason}\n"
-            f"Net P/L: Rs {record['net']}\n"
-            f"Equity: Rs {state['equity']}"
-        )
-
-    return record
-
-
-def run_paper():
-    now = now_ist()
-
-    if now.weekday() >= 5:
-        print("Weekend. No paper trading.")
-        return
-
-    if not time(9, 30) <= now.time() <= time(15, 45):
-        print("Outside paper trading hours.")
-        return
-
-    df = add_indicators(download_data(7))
-
-    # Only completed candles are eligible.
-    # Candle timestamp represents its opening time.
-    cutoff = now - timedelta(minutes=5, seconds=30)
-    df = df[df.index <= cutoff]
-
-    if df.empty:
-        print("No completed candle available.")
-        return
-
-    day = now.date().isoformat()
-    state = load_state(day)
-
-    today_df = df[
-        df.index.date == now.date()
-    ]
-
-    if today_df.empty:
-        print("No current trading day data.")
-        return
-
-    last_processed = state.get(
-        "last_processed", ""
-    )
-
-    new_bars = today_df[
-        today_df.index.map(
-            lambda x: x.isoformat() > last_processed
-        )
-    ]
-
-    if new_bars.empty:
-        print("No new completed 5m candle.")
-        return
-
-    for ts, bar in new_bars.iterrows():
-        # Never open a position on an old historical signal
-        # after the GitHub workflow has been delayed.
-        fresh = (
-            now - ts.to_pydatetime()
-        ).total_seconds() <= 12 * 60
-
-        pos = state.get("position")
-
-        if pos:
             result = manage_position(
-                pos, bar, ts
+                state["position"], candle, ts
             )
 
             if result:
-                price, reason = result
-                record_exit(
-                    state, pos, price, ts,
-                    reason, paper=True
+
+                record = close_trade(
+                    state["position"],
+                    result[0],
+                    ts,
+                    result[1]
                 )
 
-        # Enter pending signal at next candle OPEN,
-        # but only when the bar is recent.
-        pending = state.get("pending")
+                records.append(record)
 
-        if (
-            pending
-            and state["position"] is None
-            and fresh
-            and ts.isoformat() >
-                pending["signal_time"]
-            and ts.time() < time(14, 30)
-        ):
-            position = new_position(
-                pending["signal"],
-                float(bar.open),
-                ts,
-                float(state["equity"])
+                state["equity"] += record["net"]
+                state["day_pnl"] += record["net"]
+                state["position"] = None
+
+        # Entry on next candle open
+        pending = state["pending"]
+
+        if pending:
+
+            previous_ts = datetime.fromisoformat(
+                pending["time"]
             )
 
-            if position:
-                state["position"] = position
-                state["trades_today"] += 1
+            valid = (
+                ts.date() == previous_ts.date()
+                and (ts - previous_ts).total_seconds() == 300
+                and ts.time() < time(14, 25)
+            )
 
-                event(
-                    "ENTRY",
-                    position["side"],
-                    position["entry"],
-                    position["qty"],
-                    position["stop"],
-                    "PAPER ONLY"
+            if valid and state["position"] is None:
+
+                pos = create_position(
+                    pending["signal"],
+                    candle.open,
+                    ts,
+                    state["equity"]
                 )
 
-                telegram(
-                    "RELIANCE PAPER ENTRY\n"
-                    f"Side: {position['side']}\n"
-                    f"Entry: {position['entry']}\n"
-                    f"Stop: {position['stop']}\n"
-                    f"Qty: {position['qty']}\n"
-                    "NO REAL ORDER"
-                )
+                if pos:
+
+                    state["position"] = pos
+                    state["trades_today"] += 1
+
+                    # Conservative check on entry candle
+                    result = manage_position(
+                        pos, candle, ts
+                    )
+
+                    if result:
+
+                        record = close_trade(
+                            pos,
+                            result[0],
+                            ts,
+                            result[1]
+                        )
+
+                        records.append(record)
+
+                        state["equity"] += record["net"]
+                        state["day_pnl"] += record["net"]
+                        state["position"] = None
 
             state["pending"] = None
 
-        # New signal at completed candle CLOSE.
+        # Generate signal
         if (
             state["position"] is None
-            and state["pending"] is None
-            and fresh
             and state["trades_today"] < MAX_TRADES_DAY
             and state["day_pnl"] >
-                -state["day_start_equity"]
-                * DAILY_LOSS_LIMIT
-            and ts.time() < time(14, 25)
+            -state["day_start"] * DAILY_LOSS_PERCENT / 100
         ):
-            idx = df.index.get_loc(ts)
-            sig = signal(df, idx, "orb")
 
-            if sig:
+            signal = get_signal(df, i)
+
+            if signal:
+
                 state["pending"] = {
-                    "signal": sig,
-                    "signal_time": ts.isoformat()
+                    "time": ts.isoformat(),
+                    "signal": signal
                 }
 
-                event(
-                    "SIGNAL", sig["side"],
-                    float(bar.close),
-                    details="ORB VWAP VOLUME"
-                )
-
-                telegram(
-                    "RELIANCE PAPER SIGNAL\n"
-                    f"Side: {sig['side']}\n"
-                    f"Candle: {ts}\n"
-                    "Entry: NEXT 5m CANDLE\n"
-                    "PAPER ONLY"
-                )
-
-        state["last_processed"] = ts.isoformat()
-
-    # Cancel pending signal outside entry window.
-    if now.time() >= time(14, 30):
-        state["pending"] = None
-
-    save_json(STATE_FILE, state)
-
-    print("PAPER STATE:")
-    print(json.dumps(state, indent=2, default=str))
-
-
-def backtest_strategy(df, strategy):
-    trades = []
-    state = default_state("")
-
-    pending = None
-    previous_day = None
-
-    for i, (ts, bar) in enumerate(df.iterrows()):
-        day = ts.date().isoformat()
-
-        if day != previous_day:
-            state["day_pnl"] = 0.0
-            state["trades_today"] = 0
-            state["day_start_equity"] = state["equity"]
-            pending = None
-            previous_day = day
+    if state["position"]:
 
         pos = state["position"]
+        ts = df.index[-1]
 
-        if pos:
-            result = manage_position(
-                pos, bar, ts
-            )
+        price = float(df.iloc[-1].close) * (
+            1 - pos["side"] * SLIPPAGE
+        )
 
-            if result:
-                price, reason = result
-                trades.append(
-                    record_exit(
-                        state, pos, price,
-                        ts, reason, paper=False
-                    )
-                )
+        records.append(
+            close_trade(pos, price, ts, "END_OF_DATA")
+        )
 
-        if (
-            pending
-            and state["position"] is None
-            and ts.date().isoformat() ==
-                pending["day"]
-            and ts.time() < time(14, 30)
-        ):
-            position = new_position(
-                pending["signal"],
-                float(bar.open),
-                ts,
-                state["equity"]
-            )
-
-            if position:
-                state["position"] = position
-                state["trades_today"] += 1
-
-            pending = None
-
-        if (
-            state["position"] is None
-            and pending is None
-            and state["trades_today"] < MAX_TRADES_DAY
-            and state["day_pnl"] >
-                -state["day_start_equity"]
-                * DAILY_LOSS_LIMIT
-            and ts.time() < time(14, 25)
-        ):
-            sig = signal(df, i, strategy)
-
-            if sig:
-                pending = {
-                    "signal": sig,
-                    "day": day
-                }
-
-    return pd.DataFrame(
-        trades, columns=TRADE_FIELDS
+    result = pd.DataFrame(
+        records,
+        columns=TRADE_COLUMNS
     )
 
+    result.to_csv(ALL_TRADES, index=False)
 
-def run_backtest(days):
-    df = add_indicators(
-        download_data(days)
-    )
+    for strategy in ["ORB_VWAP", "RSI_BB_POC"]:
 
-    results = []
+        subset = result[
+            result.strategy == strategy
+        ]
 
-    for strategy in ["orb", "ema_vwap"]:
-        trades = backtest_strategy(
-            df, strategy
-        )
-
-        filename = (
-            "RELIANCE_ORB_TRADES.csv"
-            if strategy == "orb"
-            else "RELIANCE_EMA_VWAP_TRADES.csv"
-        )
-
-        trades.to_csv(filename, index=False)
-        results.append(trades)
-
-        net = (
-            trades.net.sum()
-            if len(trades) else 0
-        )
-
-        wins = (
-            (trades.net > 0).sum()
-            if len(trades) else 0
+        subset.to_csv(
+            f"RELIANCE_{strategy}_TRADES.csv",
+            index=False
         )
 
         print(
-            strategy.upper(),
-            "TRADES:", len(trades),
-            "WINS:", wins,
-            "NET:", money(net)
+            strategy,
+            "Trades:", len(subset),
+            "Net INR:", round(subset.net.sum(), 2)
         )
 
-    combined = pd.concat(
-        results, ignore_index=True
+    print("----------------------------------")
+    print("TOTAL TRADES:", len(result))
+    print("NET PROFIT INR:", round(result.net.sum(), 2))
+    print("----------------------------------")
+
+    print("Backtest CSV files saved")
+    print("Historical fills are simulated")
+
+
+# ---------------------------------------
+# DELAYED YAHOO PAPER TEST
+# ---------------------------------------
+
+def paper(df):
+
+    now = datetime.now(IST)
+
+    if now.weekday() >= 5:
+        print("Weekend - NSE closed")
+        return
+
+    if not time(9, 30) <= now.time() < time(15, 45):
+        print("Outside paper trading window")
+        return
+
+    # Yahoo timestamp is candle START.
+    # Allow completion plus 30 seconds.
+    cutoff = now - timedelta(
+        minutes=5, seconds=30
     )
 
-    combined.to_csv(
-        "RELIANCE_ALL_TRADES.csv",
-        index=False
+    df = df[df.index <= cutoff]
+
+    today = df[
+        df.index.date == now.date()
+    ]
+
+    if today.empty:
+        print("No completed Yahoo candle yet")
+        return
+
+    # Initialize without replaying old signals
+    if not STATE_FILE.exists():
+
+        state = new_state()
+        state["last_bar"] = (
+            today.index[-1].isoformat()
+        )
+
+        STATE_FILE.write_text(
+            json.dumps(state, indent=2)
+        )
+
+        print("Paper initialized")
+        print("Waiting for next completed candle")
+        return
+
+    state = json.loads(
+        STATE_FILE.read_text()
     )
 
-    print(
-        "COMBINED NET:",
-        money(combined.net.sum())
-        if len(combined) else 0
+    last_bar = state.get("last_bar", "")
+
+    new_indices = [
+        i for i, ts in enumerate(df.index)
+        if ts.isoformat() > last_bar
+    ]
+
+    if not new_indices:
+        print("No new Yahoo candle")
+        return
+
+    for i in new_indices:
+
+        ts = df.index[i]
+        candle = df.iloc[i]
+        day = ts.date().isoformat()
+
+        age = (
+            now - ts.to_pydatetime()
+        ).total_seconds()
+
+        # Only recent candles can create NEW entries.
+        fresh = (
+            ts.date() == now.date()
+            and 300 <= age <= 720
+        )
+
+        if state.get("day") != day:
+
+            # Previous-day open position:
+            # estimated close at prior available candle.
+            if state.get("position") and i > 0:
+
+                pos = state["position"]
+                prev = df.iloc[i - 1]
+                prev_ts = df.index[i - 1]
+
+                price = float(prev.close) * (
+                    1 - pos["side"] * SLIPPAGE
+                )
+
+                record = close_trade(
+                    pos, price, prev_ts, "DELAYED_EOD"
+                )
+
+                append_csv(
+                    PAPER_TRADES,
+                    record,
+                    TRADE_COLUMNS
+                )
+
+                state["equity"] += record["net"]
+                state["position"] = None
+
+                telegram(
+                    "RELIANCE PAPER DELAYED EOD\n"
+                    f"Net P/L INR: {record['net']}\n"
+                    "Historical estimated exit"
+                )
+
+            state["day"] = day
+            state["day_start"] = state["equity"]
+            state["day_pnl"] = 0.0
+            state["trades_today"] = 0
+
+        # Manage open paper position
+        if state.get("position"):
+
+            pos = state["position"]
+
+            result = manage_position(
+                pos, candle, ts
+            )
+
+            if result:
+
+                record = close_trade(
+                    pos, result[0], ts, result[1]
+                )
+
+                append_csv(
+                    PAPER_TRADES,
+                    record,
+                    TRADE_COLUMNS
+                )
+
+                state["equity"] += record["net"]
+                state["day_pnl"] += record["net"]
+                state["position"] = None
+
+                append_csv(
+                    PAPER_EVENTS,
+                    {
+                        "timestamp": ts.isoformat(),
+                        "event": "EXIT",
+                        "strategy": record["strategy"],
+                        "side": record["side"],
+                        "price": record["exit"],
+                        "note": record["reason"]
+                    },
+                    EVENT_COLUMNS
+                )
+
+                telegram(
+                    "RELIANCE PAPER EXIT\n"
+                    f"Strategy: {record['strategy']}\n"
+                    f"Side: {record['side']}\n"
+                    f"Exit: {record['exit']}\n"
+                    f"Net P/L INR: {record['net']}\n"
+                    f"Reason: {record['reason']}\n"
+                    "SIMULATED - NOT ZERODHA FILL"
+                )
+
+        # New indicative paper entry
+        if (
+            fresh
+            and state.get("position") is None
+            and state["trades_today"] < MAX_TRADES_DAY
+            and state["day_pnl"] >
+            -state["day_start"] * DAILY_LOSS_PERCENT / 100
+            and ts.time() < time(14, 20)
+        ):
+
+            signal = get_signal(df, i)
+
+            if signal:
+
+                pos = create_position(
+                    signal,
+                    float(candle.close),
+                    ts,
+                    state["equity"]
+                )
+
+                if pos:
+
+                    state["position"] = pos
+                    state["trades_today"] += 1
+
+                    entry = pos["entry"]
+                    side = pos["side"]
+                    risk = pos["risk"]
+
+                    target2 = entry + side * 2 * risk
+                    target3 = entry + side * 3 * risk
+                    target4 = entry + side * 4 * risk
+
+                    append_csv(
+                        PAPER_EVENTS,
+                        {
+                            "timestamp": ts.isoformat(),
+                            "event": "ENTRY",
+                            "strategy": pos["strategy"],
+                            "side": (
+                                "BUY" if side == 1 else "SELL"
+                            ),
+                            "price": round(entry, 2),
+                            "note": "Delayed indicative entry"
+                        },
+                        EVENT_COLUMNS
+                    )
+
+                    telegram(
+                        "RELIANCE 5M PAPER SIGNAL\n"
+                        f"Strategy: {pos['strategy']}\n"
+                        f"Side: {'BUY' if side == 1 else 'SELL'}\n"
+                        f"Entry: {entry:.2f}\n"
+                        f"SL: {pos['stop']:.2f}\n"
+                        f"1:2 = {target2:.2f}\n"
+                        f"1:3 = {target3:.2f}\n"
+                        f"1:4 = {target4:.2f}\n"
+                        f"Quantity: {pos['qty']}\n"
+                        "DELAYED PAPER - NO REAL ORDER"
+                    )
+
+        state["last_bar"] = ts.isoformat()
+
+    STATE_FILE.write_text(
+        json.dumps(state, indent=2)
     )
 
+    print("----------------------------------")
+    print("RELIANCE PAPER SCANNER COMPLETE")
+    print("Paper Equity INR:", round(state["equity"], 2))
+    print("Open Trade:", bool(state.get("position")))
+    print("----------------------------------")
+
+
+# ---------------------------------------
+# MAIN
+# ---------------------------------------
 
 def main():
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -864,10 +1170,26 @@ def main():
 
     args = parser.parse_args()
 
-    if args.mode == "paper":
-        run_paper()
+    print("==================================")
+    print("RELIANCE COMBINED 5M SCANNER")
+    print("RSI + BB + POC + VWAP + EMA + ORB")
+    print("1:2 -> 1:3 -> 1:4 TRAILING SL")
+    print("MODE:", args.mode)
+    print("NO REAL ZERODHA ORDERS")
+    print("==================================")
+
+    days = (
+        7 if args.mode == "paper"
+        else args.days
+    )
+
+    df = download_data(days)
+    df = add_indicators(df)
+
+    if args.mode == "backtest":
+        backtest(df)
     else:
-        run_backtest(args.days)
+        paper(df)
 
 
 if __name__ == "__main__":
