@@ -1,11 +1,21 @@
-
 # ============================================================
 # BTC_SMC_Paper.py
-# V23 PURE SMC - COINDCX BTC USDT FUTURES
+# V24 - COINDCX BTC USDT FUTURES - PAPER TRADING ONLY
 # 5 MIN ENTRY + 1 HOUR STRUCTURE
 # LIQUIDITY SWEEP + CHOCH + FVG RETEST
-# LONG / SHORT - PAPER TRADING ONLY
-# TELEGRAM ENTRY / EXIT / PROFIT LOSS
+#
+# V23 -> V24 FIXES (loss reduce karne ke liye):
+#  1. Fee/slippage filter: trade tabhi jab cost <= MAX_COST_R
+#  2. Risk range realistic: 0.30% - 1.20% (pehle 0.05% - 2.5%)
+#  3. Stop ke liye buffer (wick pe exact stop = stop hunt)
+#  4. 5m sweep ke liye bada swing (6) - micro swing noise hata
+#  5. 1H bias + EMA50 confirm (range/chop mein trade kam)
+#  6. Session filter (London + NY hours, UTC)
+#  7. Loss ke baad cooldown
+#  8. Trailing: 1.5R -> BE+, 2R -> lock 1R, 3R -> lock 2R, 4R exit
+#  9. Stale candle pe naya entry nahi (catch-up ke time)
+# 10. Stats R-multiple aur USDT mein (leverage ke saath)
+# 11. "Too many missed candles" pe bot permanently atakta tha - fixed
 # ============================================================
 
 import os
@@ -24,9 +34,7 @@ import pandas as pd
 
 PAIR = "B-BTC_USDT"
 
-FUTURES_API = (
-    "https://public.coindcx.com/market_data/candlesticks"
-)
+FUTURES_API = "https://public.coindcx.com/market_data/candlesticks"
 
 STATE_FILE = Path("BTC_SMC_Paper_state.json")
 TRADES_FILE = Path("BTC_SMC_Paper_trades.csv")
@@ -34,23 +42,38 @@ TRADES_FILE = Path("BTC_SMC_Paper_trades.csv")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 CHAT_ID = os.getenv("CHAT_ID", "").strip()
 
-SWING_LENGTH = 3
-SETUP_EXPIRY = 18
-FVG_EXPIRY = 12
+SWING_LENGTH = 3          # 1H structure swings
+SWEEP_SWING_LENGTH = 6    # 5m liquidity swings (bada = real liquidity)
+SETUP_EXPIRY = 18         # candles
+FVG_EXPIRY = 12           # candles
 
-RR_VALUES = [2, 3, 4]  # Milestones, NOT separate positions
+TARGET_RR = 4
+# (reach R, lock R): price reach_R tak aaye to stop lock_R pe shift
+TRAIL_RULES = [(1.5, 0.2), (2.0, 1.0), (3.0, 2.0)]
+
 MARGIN_USDT = 100.0
 LEVERAGE = 30
 
-# Paper trading cost assumptions
+# Costs (price % ke roop mein). Apne exchange ke actual fee se check karo.
 ROUND_TRIP_FEE = 0.001
 SLIPPAGE_PER_SIDE = 0.0002
 
-MIN_RISK_PERCENT = 0.05
-MAX_RISK_PERCENT = 2.50
+STOP_BUFFER_PCT = 0.05    # sweep extreme ke bahar extra buffer (%)
+MIN_RISK_PERCENT = 0.30
+MAX_RISK_PERCENT = 1.20
+MAX_COST_R = 0.25         # fee+slippage risk ka max 25% ho
+
+H1_EMA = 50
+TRADE_HOURS_UTC = (7, 20)  # start inclusive, end exclusive
+COOLDOWN_BARS = 12         # loss ke baad 12 x 5m = 1 ghanta
+
+MAX_ENTRY_LAG_BARS = 2     # purani candle pe naya entry nahi
+MAX_CATCHUP = 288          # 1 din tak ki missed candles process karo
 
 CANDLE_5M_MS = 5 * 60 * 1000
 CANDLE_1H_MS = 60 * 60 * 1000
+
+COST_PCT = (ROUND_TRIP_FEE + 2 * SLIPPAGE_PER_SIDE) * 100
 
 
 # =========================
@@ -58,31 +81,21 @@ CANDLE_1H_MS = 60 * 60 * 1000
 # =========================
 
 def send_telegram(message):
-
     if not BOT_TOKEN or not CHAT_ID:
         print("Telegram not configured")
         print(message)
         return
 
-    url = (
-        f"https://api.telegram.org/"
-        f"bot{BOT_TOKEN}/sendMessage"
-    )
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     try:
         response = requests.post(
             url,
-            json={
-                "chat_id": CHAT_ID,
-                "text": message
-            },
+            json={"chat_id": CHAT_ID, "text": message},
             timeout=20
         )
-
         response.raise_for_status()
-
         print("Telegram message sent")
-
     except requests.RequestException as error:
         print("Telegram error:", str(error))
 
@@ -92,34 +105,22 @@ def send_telegram(message):
 # =========================
 
 def get_candles(resolution, days):
-
     now_seconds = int(time.time())
     start_seconds = now_seconds - days * 86400
 
-    # Download in smaller chunks
     if resolution == "5":
         chunk_seconds = 2 * 86400
         candle_ms = CANDLE_5M_MS
-
     elif resolution == "60":
         chunk_seconds = 10 * 86400
         candle_ms = CANDLE_1H_MS
-
     else:
         raise ValueError("Unsupported resolution")
 
     all_rows = []
 
-    for left in range(
-        start_seconds,
-        now_seconds,
-        chunk_seconds
-    ):
-
-        right = min(
-            left + chunk_seconds,
-            now_seconds
-        )
+    for left in range(start_seconds, now_seconds, chunk_seconds):
+        right = min(left + chunk_seconds, now_seconds)
 
         params = {
             "pair": PAIR,
@@ -129,74 +130,43 @@ def get_candles(resolution, days):
             "pcode": "f"
         }
 
-        response = requests.get(
-            FUTURES_API,
-            params=params,
-            timeout=30
-        )
+        response = requests.get(FUTURES_API, params=params, timeout=30)
 
         if response.status_code != 200:
-            print(
-                "CoinDCX API error:",
-                response.status_code,
-                response.text[:500]
-            )
+            print("CoinDCX API error:", response.status_code,
+                  response.text[:500])
 
         response.raise_for_status()
-
         result = response.json()
 
         if not isinstance(result, dict):
-            raise RuntimeError(
-                "Unexpected Futures API response"
-            )
-
+            raise RuntimeError("Unexpected Futures API response")
         if result.get("s") != "ok":
-            raise RuntimeError(
-                "CoinDCX Futures API: "
-                + str(result)[:500]
-            )
+            raise RuntimeError("CoinDCX Futures API: " + str(result)[:500])
 
         payload = result.get("data", [])
-
         if not isinstance(payload, list):
-            raise RuntimeError(
-                "Invalid Futures candle payload"
-            )
+            raise RuntimeError("Invalid Futures candle payload")
 
         all_rows.extend(payload)
-
         time.sleep(0.2)
 
     if not all_rows:
-        raise RuntimeError(
-            "No CoinDCX Futures candles received"
-        )
+        raise RuntimeError("No CoinDCX Futures candles received")
 
     df = pd.DataFrame(all_rows)
 
-    required = [
-        "time", "open", "high", "low", "close"
-    ]
+    required = ["time", "open", "high", "low", "close"]
 
     for column in required:
         if column not in df.columns:
-            raise RuntimeError(
-                "Missing candle column: " + column
-            )
-
-        df[column] = pd.to_numeric(
-            df[column],
-            errors="coerce"
-        )
+            raise RuntimeError("Missing candle column: " + column)
+        df[column] = pd.to_numeric(df[column], errors="coerce")
 
     df = df.dropna(subset=required)
 
-    # Support timestamps in seconds or milliseconds
-    df["time"] = df["time"].where(
-        df["time"] > 1e11,
-        df["time"] * 1000
-    )
+    # seconds ya milliseconds dono support
+    df["time"] = df["time"].where(df["time"] > 1e11, df["time"] * 1000)
 
     df = (
         df.drop_duplicates("time")
@@ -204,26 +174,18 @@ def get_candles(resolution, days):
         .reset_index(drop=True)
     )
 
-    # Only fully completed candles
+    # sirf poori band candles
     now_ms = int(time.time() * 1000)
+    df = df[df["time"] + candle_ms <= now_ms].reset_index(drop=True)
 
-    df = df[
-        df["time"] + candle_ms <= now_ms
-    ].reset_index(drop=True)
-
-    minimum = 100 if resolution == "5" else 30
+    minimum = 100 if resolution == "5" else max(30, H1_EMA)
 
     if len(df) < minimum:
         raise RuntimeError(
-            f"Insufficient {resolution} candles: "
-            f"{len(df)}"
+            f"Insufficient {resolution} candles: {len(df)}"
         )
 
-    print(
-        f"Futures {resolution} candles loaded:",
-        len(df)
-    )
-
+    print(f"Futures {resolution} candles loaded:", len(df))
     return df
 
 
@@ -232,65 +194,47 @@ def get_candles(resolution, days):
 # =========================
 
 def find_swings(df, length=SWING_LENGTH):
+    highs = df["high"].to_numpy(dtype=float)
+    lows = df["low"].to_numpy(dtype=float)
 
     swing_highs = []
     swing_lows = []
 
-    for i in range(
-        length,
-        len(df) - length
-    ):
+    for i in range(length, len(df) - length):
+        high_window = highs[i - length:i + length + 1]
+        low_window = lows[i - length:i + length + 1]
 
-        window = df.iloc[
-            i - length:i + length + 1
-        ]
+        if highs[i] == high_window.max() and (high_window == highs[i]).sum() == 1:
+            swing_highs.append((i, float(highs[i])))
 
-        current = df.iloc[i]
-
-        if (
-            current["high"] == window["high"].max()
-            and
-            (window["high"] == current["high"]).sum() == 1
-        ):
-
-            swing_highs.append(
-                (i, float(current["high"]))
-            )
-
-        if (
-            current["low"] == window["low"].min()
-            and
-            (window["low"] == current["low"]).sum() == 1
-        ):
-
-            swing_lows.append(
-                (i, float(current["low"]))
-            )
+        if lows[i] == low_window.min() and (low_window == lows[i]).sum() == 1:
+            swing_lows.append((i, float(lows[i])))
 
     return swing_highs, swing_lows
 
 
 # =========================
-# 5. ONE HOUR MARKET STRUCTURE
+# 5. ONE HOUR MARKET STRUCTURE (+ EMA confirm)
 # =========================
 
 def get_h1_bias(df):
+    highs, lows = find_swings(df, SWING_LENGTH)
 
-    highs, lows = find_swings(df)
-
-    if len(highs) < 2 or len(lows) < 2:
+    if len(highs) < 2 or len(lows) < 2 or len(df) < H1_EMA:
         return "NEUTRAL"
+
+    ema = df["close"].ewm(span=H1_EMA, adjust=False).mean().iloc[-1]
+    last_close = float(df["close"].iloc[-1])
 
     higher_high = highs[-1][1] > highs[-2][1]
     higher_low = lows[-1][1] > lows[-2][1]
-
     lower_high = highs[-1][1] < highs[-2][1]
     lower_low = lows[-1][1] < lows[-2][1]
 
-    if higher_high and higher_low:
+    if higher_high and higher_low and last_close > ema:
         return "LONG"
 
-    if lower_high and lower_low:
+    if lower_high and lower_low and last_close < ema:
         return "SHORT"
 
     return "NEUTRAL"
@@ -301,7 +245,6 @@ def get_h1_bias(df):
 # =========================
 
 def new_state():
-
     return {
         "last_bar": 0,
         "setup": None,
@@ -309,40 +252,30 @@ def new_state():
         "closed": 0,
         "wins": 0,
         "losses": 0,
-        "net_pct": 0.0
+        "net_pct": 0.0,
+        "r_sum": 0.0,
+        "pnl_usdt": 0.0,
+        "cooldown_until": 0
     }
 
 
 def load_state():
-
     if STATE_FILE.exists():
-
-        with open(
-            STATE_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            return json.load(file)
+        with open(STATE_FILE, "r", encoding="utf-8") as file:
+            state = json.load(file)
+        # purane state file mein naye keys add karo
+        for key, value in new_state().items():
+            state.setdefault(key, value)
+        return state
 
     return new_state()
 
 
 def save_state(state):
-
     temp_file = STATE_FILE.with_suffix(".tmp")
 
-    with open(
-        temp_file,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            state,
-            file,
-            indent=2
-        )
+    with open(temp_file, "w", encoding="utf-8") as file:
+        json.dump(state, file, indent=2)
 
     temp_file.replace(STATE_FILE)
 
@@ -352,27 +285,14 @@ def save_state(state):
 # =========================
 
 def save_trade(trade):
-
     columns = [
-        "time_utc",
-        "side",
-        "rr",
-        "entry",
-        "stop",
-        "target",
-        "exit",
-        "reason",
-        "gross_pct",
-        "net_pct",
-        "margin_usdt",
-        "trade_mode",
-        "max_rr_reached"
+        "time_utc", "side", "rr", "entry", "stop", "initial_stop",
+        "target", "exit", "reason", "gross_pct", "net_pct",
+        "r_multiple", "pnl_usdt", "risk_pct", "margin_usdt",
+        "trade_mode", "max_rr_reached"
     ]
 
-    row = {
-        column: trade.get(column, "")
-        for column in columns
-    }
+    row = {column: trade.get(column, "") for column in columns}
 
     pd.DataFrame([row]).to_csv(
         TRADES_FILE,
@@ -387,14 +307,13 @@ def save_trade(trade):
 # =========================
 
 def check_exits(state, bar):
-    """One full-size position: 2R -> SL at 2R; 3R -> SL at 3R; exit 4R.
+    """Ek full position. Milestones sirf stop shift karte hain (no partial).
 
-    Existing legacy RR=2/3 positions are allowed to finish unchanged.
-    Intrabar OHLC ordering is unknown: a pre-existing stop takes priority.
-    New trailing stops activate from the NEXT completed 5m candle, never
-    retroactively within the candle that first reached the milestone.
+    Same candle mein stop aur target dono touch ho to stop jeetta hai.
+    Naya trail stop agli completed candle se active hota hai.
     """
     remaining = []
+
     for position in state["positions"]:
         if bar["time"] <= position["entry_time"]:
             remaining.append(position)
@@ -405,34 +324,40 @@ def check_exits(state, bar):
         high, low = float(bar["high"]), float(bar["low"])
         entry, stop = float(position["entry"]), float(position["stop"])
         target = float(position["target"])
+        is_trail_mode = position.get("trade_mode") == "SINGLE_TRAIL_4R"
+
         stop_hit = low <= stop if is_long else high >= stop
         target_hit = high >= target if is_long else low <= target
         exit_price, reason = None, None
 
         if stop_hit:
-            # Conservative: stop wins when old stop and target both touched.
             exit_price = stop
-            reason = "TRAIL STOP" if position.get("trade_mode") == "SINGLE_TRAIL_4R" and position.get("max_rr_reached", 0) >= 2 else "STOP LOSS"
+            moved = float(position.get("max_rr_reached", 0)) > 0
+            reason = "TRAIL STOP" if (is_trail_mode and moved) else "STOP LOSS"
         elif target_hit:
             exit_price = target
-            reason = "FINAL TARGET 4R" if position.get("trade_mode") == "SINGLE_TRAIL_4R" else "TARGET HIT"
-        elif position.get("trade_mode") == "SINGLE_TRAIL_4R":
-            # Milestones move the full position's stop, never book partial P/L.
+            reason = f"FINAL TARGET {TARGET_RR}R" if is_trail_mode else "TARGET HIT"
+        elif is_trail_mode:
             risk = float(position["initial_risk"])
-            reached = int(position.get("max_rr_reached", 0))
-            for rr in (3, 2):
-                milestone = entry + direction * rr * risk
+            reached = float(position.get("max_rr_reached", 0))
+
+            for reach_rr, lock_rr in sorted(TRAIL_RULES, reverse=True):
+                milestone = entry + direction * reach_rr * risk
                 touched = high >= milestone if is_long else low <= milestone
-                if touched and rr > reached:
-                    position["stop"] = milestone
-                    position["max_rr_reached"] = rr
-                    alert = (f"BTC SMC PAPER - TRAILING STOP UPDATED\n"
-                             f"Side: {position['side']}\n"
-                             f"Reached: 1:{rr}\n"
-                             f"New Stop Loss: {milestone:.2f}\n"
-                             f"Position Open: 100%\n"
-                             f"Final Target 1:4: {target:.2f}\n"
-                             "PAPER TRADING ONLY")
+
+                if touched and reach_rr > reached:
+                    new_stop = entry + direction * lock_rr * risk
+                    position["stop"] = new_stop
+                    position["max_rr_reached"] = reach_rr
+
+                    alert = (
+                        "BTC SMC PAPER - TRAILING STOP UPDATED\n"
+                        f"Side: {position['side']}\n"
+                        f"Reached: {reach_rr}R\n"
+                        f"New Stop Loss: {new_stop:.2f} (locks {lock_rr}R)\n"
+                        f"Final Target {TARGET_RR}R: {target:.2f}\n"
+                        "PAPER TRADING ONLY"
+                    )
                     print(alert)
                     send_telegram(alert)
                     break
@@ -442,40 +367,67 @@ def check_exits(state, bar):
             continue
 
         gross_pct = (exit_price / entry - 1) * 100 * direction
-        costs_pct = (ROUND_TRIP_FEE + 2 * SLIPPAGE_PER_SIDE) * 100
-        net_pct = gross_pct - costs_pct
+        net_pct = gross_pct - COST_PCT
+
+        initial_risk = float(position.get("initial_risk", abs(entry - stop)))
+        risk_pct = initial_risk / entry * 100
+        r_multiple = net_pct / risk_pct if risk_pct > 0 else 0.0
+
+        margin = float(position.get("margin_usdt", MARGIN_USDT))
+        pnl_usdt = net_pct / 100 * margin * LEVERAGE
+
         state["closed"] += 1
         if net_pct > 0:
             state["wins"] += 1
         else:
             state["losses"] += 1
+            state["cooldown_until"] = int(
+                bar["time"] + COOLDOWN_BARS * CANDLE_5M_MS
+            )
+
         state["net_pct"] = round(state["net_pct"] + net_pct, 6)
-        timestamp = datetime.fromtimestamp(bar["time"] / 1000, timezone.utc).isoformat()
-        trade = {**position, "time_utc": timestamp, "exit": exit_price,
-                 "reason": reason, "gross_pct": round(gross_pct, 4),
-                 "net_pct": round(net_pct, 4),
-                 "margin_usdt": position.get("margin_usdt", MARGIN_USDT)}
+        state["r_sum"] = round(state["r_sum"] + r_multiple, 4)
+        state["pnl_usdt"] = round(state["pnl_usdt"] + pnl_usdt, 4)
+
+        timestamp = datetime.fromtimestamp(
+            bar["time"] / 1000, timezone.utc
+        ).isoformat()
+
+        trade = {
+            **position,
+            "time_utc": timestamp,
+            "exit": exit_price,
+            "reason": reason,
+            "gross_pct": round(gross_pct, 4),
+            "net_pct": round(net_pct, 4),
+            "r_multiple": round(r_multiple, 3),
+            "pnl_usdt": round(pnl_usdt, 3),
+            "risk_pct": round(risk_pct, 4),
+            "margin_usdt": margin
+        }
         save_trade(trade)
+
         closed = state["closed"]
         win_rate = state["wins"] / closed * 100
+
         message = (
             "BTC SMC PAPER - TRADE CLOSED\n"
             f"Side: {position['side']}\n"
-            f"Mode: {position.get('trade_mode', 'LEGACY RR LEG')}\n"
             f"Result: {reason}\n"
             f"Entry: {entry:.2f}\n"
             f"Exit: {exit_price:.2f}\n"
-            f"Margin: ${float(position.get('margin_usdt', MARGIN_USDT)):.2f}\n"
-            f"Net Return: {net_pct:+.3f}%\n\n"
-            f"Closed Records: {closed}\n"
-            f"Wins: {state['wins']}\n"
+            f"Net: {net_pct:+.3f}% | {r_multiple:+.2f}R | "
+            f"{pnl_usdt:+.2f} USDT\n\n"
+            f"Closed: {closed} | Wins: {state['wins']} | "
             f"Losses: {state['losses']}\n"
             f"Win Rate: {win_rate:.2f}%\n"
-            f"Sum Net Returns: {state['net_pct']:+.3f}%\n"
+            f"Total R: {state['r_sum']:+.2f} | "
+            f"Total PnL: {state['pnl_usdt']:+.2f} USDT\n"
             "PAPER TRADING ONLY"
         )
         print(message)
         send_telegram(message)
+
     state["positions"] = remaining
 
 
@@ -484,49 +436,32 @@ def check_exits(state, bar):
 # =========================
 
 def detect_sweep(df, i, side):
-
     previous = df.iloc[:i]
-
-    highs, lows = find_swings(previous)
-
+    highs, lows = find_swings(previous, SWEEP_SWING_LENGTH)
     bar = df.iloc[i]
 
     if side == "LONG" and lows:
-
         swing_low = lows[-1][1]
 
-        if (
-            bar["low"] < swing_low
-            and bar["close"] > swing_low
-        ):
-
+        if bar["low"] < swing_low and bar["close"] > swing_low:
             return {
                 "side": "LONG",
                 "stage": "SWEEP",
                 "sweep_time": int(bar["time"]),
                 "extreme": float(bar["low"]),
-                "break_level": (
-                    highs[-1][1] if highs else None
-                )
+                "break_level": highs[-1][1] if highs else None
             }
 
     if side == "SHORT" and highs:
-
         swing_high = highs[-1][1]
 
-        if (
-            bar["high"] > swing_high
-            and bar["close"] < swing_high
-        ):
-
+        if bar["high"] > swing_high and bar["close"] < swing_high:
             return {
                 "side": "SHORT",
                 "stage": "SWEEP",
                 "sweep_time": int(bar["time"]),
                 "extreme": float(bar["high"]),
-                "break_level": (
-                    lows[-1][1] if lows else None
-                )
+                "break_level": lows[-1][1] if lows else None
             }
 
     return None
@@ -536,23 +471,23 @@ def detect_sweep(df, i, side):
 # 10. SMC SETUP
 # =========================
 
-def process_smc(df, i, state, bias):
+def in_session(bar_time_ms):
+    hour = datetime.fromtimestamp(bar_time_ms / 1000, timezone.utc).hour
+    return TRADE_HOURS_UTC[0] <= hour < TRADE_HOURS_UTC[1]
 
+
+def process_smc(df, i, state, bias, fresh=True):
     bar = df.iloc[i]
     setup = state.get("setup")
 
     if setup:
-
         expired = (
-            bar["time"] - setup["sweep_time"]
-            > SETUP_EXPIRY * CANDLE_5M_MS
+            bar["time"] - setup["sweep_time"] > SETUP_EXPIRY * CANDLE_5M_MS
         )
-
         if expired or setup["side"] != bias:
             setup = None
 
     if setup:
-
         is_long = setup["side"] == "LONG"
 
         invalidated = (
@@ -565,165 +500,111 @@ def process_smc(df, i, state, bias):
             setup = None
 
         elif setup["stage"] == "SWEEP":
-
             level = setup["break_level"]
 
             if level is not None:
-
                 choch = (
-                    bar["close"] > level
-                    if is_long
-                    else bar["close"] < level
+                    bar["close"] > level if is_long else bar["close"] < level
                 )
-
                 if choch:
-
                     setup["stage"] = "CHOCH"
-                    setup["choch_time"] = int(
-                        bar["time"]
-                    )
-
-                    print(
-                        "SMC CHOCH:",
-                        setup["side"]
-                    )
+                    setup["choch_time"] = int(bar["time"])
+                    print("SMC CHOCH:", setup["side"])
 
         elif setup["stage"] == "CHOCH":
-
             if i >= 2:
-
                 first = df.iloc[i - 2]
 
-                bullish_fvg = (
-                    bar["low"] > first["high"]
-                )
-
-                bearish_fvg = (
-                    bar["high"] < first["low"]
-                )
+                bullish_fvg = bar["low"] > first["high"]
+                bearish_fvg = bar["high"] < first["low"]
 
                 if is_long and bullish_fvg:
-
                     setup.update({
                         "stage": "FVG",
-                        "fvg_low": float(
-                            first["high"]
-                        ),
-                        "fvg_high": float(
-                            bar["low"]
-                        ),
-                        "fvg_time": int(
-                            bar["time"]
-                        )
+                        "fvg_low": float(first["high"]),
+                        "fvg_high": float(bar["low"]),
+                        "fvg_time": int(bar["time"])
                     })
-
-                elif (
-                    not is_long
-                    and bearish_fvg
-                ):
-
+                elif not is_long and bearish_fvg:
                     setup.update({
                         "stage": "FVG",
-                        "fvg_low": float(
-                            bar["high"]
-                        ),
-                        "fvg_high": float(
-                            first["low"]
-                        ),
-                        "fvg_time": int(
-                            bar["time"]
-                        )
+                        "fvg_low": float(bar["high"]),
+                        "fvg_high": float(first["low"]),
+                        "fvg_time": int(bar["time"])
                     })
 
         elif setup["stage"] == "FVG":
-
             fvg_expired = (
-                bar["time"] - setup["fvg_time"]
-                > FVG_EXPIRY * CANDLE_5M_MS
+                bar["time"] - setup["fvg_time"] > FVG_EXPIRY * CANDLE_5M_MS
             )
 
             if fvg_expired:
                 setup = None
-
             else:
-
                 touched = (
                     bar["low"] <= setup["fvg_high"]
-                    and
-                    bar["high"] >= setup["fvg_low"]
+                    and bar["high"] >= setup["fvg_low"]
                 )
 
                 if is_long:
-
                     rejection = (
                         bar["close"] > bar["open"]
-                        and
-                        bar["close"] > setup["fvg_high"]
+                        and bar["close"] > setup["fvg_high"]
                     )
-
                 else:
-
                     rejection = (
                         bar["close"] < bar["open"]
-                        and
-                        bar["close"] < setup["fvg_low"]
+                        and bar["close"] < setup["fvg_low"]
                     )
 
                 if touched and rejection:
-
                     entry = float(bar["close"])
-                    stop = float(setup["extreme"])
+                    buffer = entry * STOP_BUFFER_PCT / 100
+                    extreme = float(setup["extreme"])
+                    stop = extreme - buffer if is_long else extreme + buffer
 
                     risk = abs(entry - stop)
+                    risk_percent = risk / entry * 100
 
-                    risk_percent = (
-                        risk / entry * 100
-                    )
-
-                    valid_direction = (
-                        stop < entry
-                        if is_long
-                        else stop > entry
-                    )
-
+                    valid_direction = stop < entry if is_long else stop > entry
                     valid_risk = (
-                        MIN_RISK_PERCENT
-                        <= risk_percent
-                        <= MAX_RISK_PERCENT
+                        MIN_RISK_PERCENT <= risk_percent <= MAX_RISK_PERCENT
+                    )
+                    cost_r = COST_PCT / risk_percent if risk_percent > 0 else 99
+                    valid_cost = cost_r <= MAX_COST_R
+
+                    allowed = (
+                        fresh
+                        and in_session(bar["time"])
+                        and bar["time"] >= state.get("cooldown_until", 0)
+                        and not state["positions"]
                     )
 
-                    if (
-                        valid_direction
-                        and valid_risk
-                        and not state["positions"]
-                    ):
+                    if valid_direction and valid_risk and valid_cost and allowed:
+                        sign = 1 if is_long else -1
+                        target = entry + sign * TARGET_RR * risk
 
-                        # One $100 margin position; NO partial exits.
-                        # 2R -> move SL to 2R; 3R -> move SL to 3R;
-                        # 4R -> close the entire position.
                         position = {
                             "side": setup["side"],
-                            "rr": 4,
+                            "rr": TARGET_RR,
                             "entry": entry,
                             "stop": stop,
                             "initial_stop": stop,
                             "initial_risk": risk,
-                            "target": entry + (4 * risk if is_long else -4 * risk),
+                            "target": target,
                             "entry_time": int(bar["time"]),
                             "trade_mode": "SINGLE_TRAIL_4R",
                             "max_rr_reached": 0,
                             "margin_usdt": MARGIN_USDT
                         }
                         state["positions"].append(position)
-                        target2 = entry + (2 * risk if is_long else -2 * risk)
-                        target3 = entry + (3 * risk if is_long else -3 * risk)
-                        target4 = position["target"]
 
-                        timestamp = (
-                            datetime.fromtimestamp(
-                                bar["time"] / 1000,
-                                timezone.utc
-                            ).isoformat()
+                        timestamp = datetime.fromtimestamp(
+                            bar["time"] / 1000, timezone.utc
+                        ).isoformat()
+
+                        trail_text = " | ".join(
+                            f"{r}R->lock {l}R" for r, l in TRAIL_RULES
                         )
 
                         message = (
@@ -732,20 +613,26 @@ def process_smc(df, i, state, bias):
                             f"Pair: {PAIR}\n"
                             f"Side: {setup['side']}\n"
                             f"1H Bias: {bias}\n"
-                            "Setup: Liquidity Sweep "
-                            "+ CHOCH + FVG Retest\n"
+                            "Setup: Sweep + CHOCH + FVG Retest\n"
                             f"Entry: {entry:.2f}\n"
-                            f"Stop Loss: {stop:.2f}\n"
-                            f"Target RR2: {target2:.2f}\n"
-                            f"Target RR3: {target3:.2f} (move SL to RR3)\n"
-                            f"Target RR4: {target4:.2f} (full exit)\n"
-                            "At RR2: move SL to RR2; no partial exit\n"
-                            "Margin: $100 total, Leverage: 30x\n"
+                            f"Stop Loss: {stop:.2f} ({risk_percent:.2f}%)\n"
+                            f"Cost: {cost_r:.2f}R\n"
+                            f"Target {TARGET_RR}R: {target:.2f}\n"
+                            f"Trail: {trail_text}\n"
+                            f"Margin: ${MARGIN_USDT:.0f}, "
+                            f"Leverage: {LEVERAGE}x\n"
                             "PAPER TRADING ONLY"
                         )
-
                         print(message)
                         send_telegram(message)
+                    else:
+                        print(
+                            "ENTRY SKIPPED:",
+                            f"risk={risk_percent:.3f}%",
+                            f"costR={cost_r:.2f}",
+                            f"fresh={fresh}",
+                            f"session={in_session(bar['time'])}"
+                        )
 
                     setup = None
 
@@ -753,19 +640,12 @@ def process_smc(df, i, state, bias):
         setup is None
         and bias in ("LONG", "SHORT")
         and not state["positions"]
+        and in_session(bar["time"])
+        and bar["time"] >= state.get("cooldown_until", 0)
     ):
-
-        setup = detect_sweep(
-            df,
-            i,
-            bias
-        )
-
+        setup = detect_sweep(df, i, bias)
         if setup:
-            print(
-                "Liquidity Sweep:",
-                setup["side"]
-            )
+            print("Liquidity Sweep:", setup["side"])
 
     state["setup"] = setup
 
@@ -775,125 +655,76 @@ def process_smc(df, i, state, bias):
 # =========================
 
 def main():
-
     print("=" * 55)
-    print("BTC SMC PAPER - V23 SINGLE POSITION TRAIL 2R/3R/4R")
+    print("BTC SMC PAPER - V24")
     print("COINDCX BTC USDT FUTURES")
     print("5M ENTRY + 1H MARKET STRUCTURE")
     print("PAPER TRADING ONLY")
     print("=" * 55)
 
-    df5 = get_candles(
-        resolution="5",
-        days=6
-    )
-
-    df1 = get_candles(
-        resolution="60",
-        days=18
-    )
+    df5 = get_candles(resolution="5", days=6)
+    df1 = get_candles(resolution="60", days=18)
 
     state = load_state()
 
-    # First run initializes at the latest completed candle.
-    # No historical paper trades are invented.
-
     if not state["last_bar"]:
-
-        state["last_bar"] = int(
-            df5.iloc[-1]["time"]
-        )
-
+        state["last_bar"] = int(df5.iloc[-1]["time"])
         save_state(state)
-
-        print(
-            "INITIALIZED SUCCESSFULLY"
-        )
-
-        print(
-            "Waiting for next completed 5m candle"
-        )
-
+        print("INITIALIZED SUCCESSFULLY")
+        print("Waiting for next completed 5m candle")
         return
 
-    new_indices = df5.index[
-        df5["time"] > state["last_bar"]
-    ].tolist()
+    new_indices = df5.index[df5["time"] > state["last_bar"]].tolist()
 
     if not new_indices:
-
-        print(
-            "NO NEW COMPLETED 5M CANDLE"
-        )
-
+        print("NO NEW COMPLETED 5M CANDLE")
         return
 
-    if len(new_indices) > 12:
-
-        raise RuntimeError(
-            "Too many missed 5m candles. "
-            "Manual review required."
+    if len(new_indices) > MAX_CATCHUP:
+        warning = (
+            f"BTC SMC PAPER WARNING: {len(new_indices)} candles missed, "
+            f"sirf last {MAX_CATCHUP} process ho rahi hain."
         )
+        print(warning)
+        send_telegram(warning)
+        new_indices = new_indices[-MAX_CATCHUP:]
+
+    latest_time = int(df5.iloc[-1]["time"])
 
     for i in new_indices:
-
         bar = df5.iloc[i]
 
-        # Avoid future-data leakage:
-        # only use 1H candles already closed.
-
+        # Future-data leakage nahi: sirf band ho chuki 1H candles
         eligible_h1 = df1[
-            df1["time"] + CANDLE_1H_MS
-            <= bar["time"] + CANDLE_5M_MS
+            df1["time"] + CANDLE_1H_MS <= bar["time"] + CANDLE_5M_MS
         ]
+        bias = get_h1_bias(eligible_h1)
 
-        bias = get_h1_bias(
-            eligible_h1
-        )
+        fresh = (latest_time - int(bar["time"])) <= MAX_ENTRY_LAG_BARS * CANDLE_5M_MS
 
-        check_exits(
-            state,
-            bar
-        )
+        check_exits(state, bar)
+        process_smc(df5, i, state, bias, fresh)
 
-        process_smc(
-            df5,
-            i,
-            state,
-            bias
-        )
-
-        state["last_bar"] = int(
-            bar["time"]
-        )
-
+        state["last_bar"] = int(bar["time"])
         save_state(state)
 
         print(
             "5M:",
-            datetime.fromtimestamp(
-                bar["time"] / 1000,
-                timezone.utc
-            ).isoformat(),
-            "| 1H:",
-            bias,
-            "| Open Legs:",
-            len(state["positions"])
+            datetime.fromtimestamp(bar["time"] / 1000, timezone.utc).isoformat(),
+            "| 1H:", bias,
+            "| Open:", len(state["positions"])
         )
+
+    closed = state["closed"]
+    win_rate = (state["wins"] / closed * 100) if closed else 0.0
 
     print("=" * 55)
     print("PAPER TRADING SUMMARY")
-    print("Closed Legs:", state["closed"])
-    print("Wins:", state["wins"])
-    print("Losses:", state["losses"])
-
-    print(
-        "Sum Net Returns:",
-        round(state["net_pct"], 4),
-        "%"
-    )
-
-    print("V23 SCAN COMPLETE")
+    print("Closed:", closed, "| Wins:", state["wins"],
+          "| Losses:", state["losses"], f"| WR: {win_rate:.1f}%")
+    print("Total R:", round(state["r_sum"], 3),
+          "| PnL USDT:", round(state["pnl_usdt"], 2))
+    print("V24 SCAN COMPLETE")
     print("=" * 55)
 
 
