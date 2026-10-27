@@ -1,0 +1,92 @@
+
+name: RIL CANDLESTICK BIBLE PAPER SCANNER
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    # Monday to Friday
+    # Every 5 minutes during NSE market window
+    # GitHub cron uses UTC
+    - cron: "*/5 3-10 * * 1-5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ril-candlestick-bible-paper
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Run RIL Candlestick Bible Scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas numpy requests yfinance
+
+      - name: Verify Python File
+        run: |
+          test -f RIL_CANDLESTICK_BIBLE.py
+          python -m py_compile RIL_CANDLESTICK_BIBLE.py
+
+      - name: Run Candlestick Bible Scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.CHAT_ID }}
+          TZ: Asia/Kolkata
+        run: |
+          set -o pipefail
+          python -u RIL_CANDLESTICK_BIBLE.py | tee RIL_CANDLESTICK_BIBLE_LOG.txt
+
+      - name: Save Paper Trading Files
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for file in \
+            RIL_CANDLESTICK_BIBLE_state.json \
+            RIL_CANDLESTICK_BIBLE_trades.csv \
+            RIL_CANDLESTICK_BIBLE_events.csv
+          do
+            if [ -f "$file" ]; then
+              git add -f "$file"
+            fi
+          done
+
+          if ! git diff --cached --quiet; then
+            git commit -m "Update RIL Candlestick Bible paper results [skip ci]"
+            git push
+          else
+            echo "No paper trading file changes"
+          fi
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RIL_CANDLESTICK_BIBLE_REPORTS
+          path: |
+            RIL_CANDLESTICK_BIBLE_LOG.txt
+            RIL_CANDLESTICK_BIBLE_state.json
+            RIL_CANDLESTICK_BIBLE_trades.csv
+            RIL_CANDLESTICK_BIBLE_events.csv
+          if-no-files-found: warn
+          retention-days: 30
