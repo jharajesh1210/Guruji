@@ -5,3 +5,7 @@ time,pair,direction,reason,range_pct,sweep_depth_pct
 2026-10-26T21:45:00+00:00,B-ONDO_USDT,LONG,max_entries_per_bar,,
 2026-10-26T21:45:00+00:00,B-ICP_USDT,LONG,max_entries_per_bar,,
 2026-10-26T21:45:00+00:00,B-ARB_USDT,LONG,max_entries_per_bar,,
+2026-10-27T10:45:00+00:00,B-NEAR_USDT,LONG,entry_ran_away_0.49pct,,
+2026-10-27T10:45:00+00:00,B-INJ_USDT,LONG,entry_ran_away_0.31pct,,
+2026-10-27T10:45:00+00:00,B-XRP_USDT,LONG,max_entries_per_bar,,
+2026-10-27T10:45:00+00:00,B-SUI_USDT,LONG,max_entries_per_bar,,
