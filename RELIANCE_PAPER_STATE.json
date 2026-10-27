@@ -8,5 +8,8 @@
   "pending": null,
   "last_processed": "2026-10-26T14:50:00+05:30",
   "last_signal_bar": "",
-  "last_alert": ""
+  "last_alert": "",
+  "day": "2026-10-27",
+  "day_start": 100000.0,
+  "last_bar": "2026-10-27T09:25:00+05:30"
 }
