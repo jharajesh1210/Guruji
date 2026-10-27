@@ -1,0 +1,38 @@
+name: THREE NSE EQUITY SCANNERS REPORT
+
+on:
+  workflow_dispatch:
+  schedule:
+    # After NSE close, weekdays (UTC)
+    - cron: "30 11 * * 1-5"
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Create combined report
+        run: |
+          python -u THREE_SCANNERS_REPORT.py
+
+      - name: Upload combined report
+        uses: actions/upload-artifact@v4
+        with:
+          name: THREE_NSE_EQUITY_SCANNERS_REPORT
+          path: |
+            THREE_SCANNERS_SUMMARY.csv
+            THREE_SCANNERS_ALL_TRADES.csv
+            THREE_SCANNERS_REPORT.html
+          if-no-files-found: error
+          retention-days: 30
