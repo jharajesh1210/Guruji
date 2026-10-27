@@ -1,0 +1,107 @@
+
+name: NIFTY50 EQUITY INTRADAY PAPER SCANNER
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Select scanner mode"
+        required: true
+        default: paper
+        type: choice
+        options:
+          - paper
+          - scan
+
+  schedule:
+    # Monday to Friday, every 5 minutes
+    # GitHub Actions cron uses UTC
+    - cron: "*/5 3-10 * * 1-5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nifty50-equity-paper
+  cancel-in-progress: false
+
+jobs:
+  nifty50:
+    name: Run NIFTY50 Equity Intraday Scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas numpy requests yfinance
+
+      - name: Verify Python File
+        run: |
+          test -f NIFTY50_EQUITY_INTRADAY.py
+          python -m py_compile NIFTY50_EQUITY_INTRADAY.py
+
+      - name: Run NIFTY50 Scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          MODE: ${{ github.event.inputs.mode || 'paper' }}
+        run: |
+          set -o pipefail
+
+          if [ "$MODE" = "scan" ]; then
+            echo "NIFTY50 EQUITY SCAN MODE"
+            python -u NIFTY50_EQUITY_INTRADAY.py --mode scan | tee NIFTY50_RUN_LOG.txt
+          else
+            echo "NIFTY50 EQUITY PAPER MODE"
+            python -u NIFTY50_EQUITY_INTRADAY.py --mode paper | tee NIFTY50_RUN_LOG.txt
+          fi
+
+      - name: Save Paper Trading Files
+        if: success() && (github.event_name == 'schedule' || github.event.inputs.mode == 'paper')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for file in \
+            NIFTY50_EQUITY_PAPER_STATE.json \
+            NIFTY50_EQUITY_PAPER_TRADES.csv \
+            NIFTY50_EQUITY_PAPER_EVENTS.csv \
+            NIFTY50_EQUITY_SIGNALS.csv
+          do
+            if [ -f "$file" ]; then
+              git add -f "$file"
+            fi
+          done
+
+          if ! git diff --cached --quiet; then
+            git commit -m "Update NIFTY50 equity paper results [skip ci]"
+            git push
+          else
+            echo "No new paper trading changes"
+          fi
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NIFTY50_EQUITY_INTRADAY_REPORTS
+          path: |
+            NIFTY50_RUN_LOG.txt
+            NIFTY50_EQUITY_PAPER_STATE.json
+            NIFTY50_EQUITY_PAPER_TRADES.csv
+            NIFTY50_EQUITY_PAPER_EVENTS.csv
+            NIFTY50_EQUITY_SIGNALS.csv
+          if-no-files-found: warn
+          retention-days: 30
