@@ -2,7 +2,8 @@
 #!/usr/bin/env python3
 # THREE_SCANNERS_REPORT.py
 # COMBINED NSE EQUITY PAPER TRADING REPORT
-# Read-only: Does not modify trading scanner files.
+# NIFTY50 + RELIANCE + CANDLESTICK BIBLE
+# READ ONLY - DOES NOT MODIFY SCANNER DATA
 
 import csv
 import json
@@ -29,6 +30,7 @@ SCANNERS = {
             "NIFTY50_EQUITY_TRADES.csv",
         ],
     },
+
     "RELIANCE 5MIN": {
         "states": [
             "RELIANCE_PAPER_STATE.json",
@@ -37,6 +39,7 @@ SCANNERS = {
             "RELIANCE_PAPER_TRADES.csv",
         ],
     },
+
     "RIL CANDLESTICK BIBLE": {
         "states": [
             "RIL_CANDLESTICK_BIBLE_state.json",
@@ -50,15 +53,28 @@ SCANNERS = {
 }
 
 
+# -------------------------------------
+# FIND FILE
+# -------------------------------------
+
 def find_file(names):
+
     for name in names:
+
         path = ROOT / name
+
         if path.is_file():
             return path
+
     return None
 
 
+# -------------------------------------
+# NUMBER CONVERSION
+# -------------------------------------
+
 def to_number(value):
+
     if value is None or value == "":
         return None
 
@@ -69,11 +85,17 @@ def to_number(value):
             .replace("₹", "")
             .strip()
         )
+
     except (ValueError, TypeError):
         return None
 
 
+# -------------------------------------
+# READ VALUE FROM DICTIONARY
+# -------------------------------------
+
 def get_value(row, names):
+
     if not isinstance(row, dict):
         return None
 
@@ -84,6 +106,7 @@ def get_value(row, names):
     }
 
     for name in names:
+
         value = lookup.get(name.lower())
 
         if value is not None and str(value).strip():
@@ -92,11 +115,17 @@ def get_value(row, names):
     return None
 
 
+# -------------------------------------
+# LOAD JSON STATE
+# -------------------------------------
+
 def load_state(path):
+
     if path is None:
         return None, "STATE NOT FOUND"
 
     try:
+
         with path.open(encoding="utf-8") as file:
             state = json.load(file)
 
@@ -106,19 +135,28 @@ def load_state(path):
         return state, "STATE FOUND"
 
     except Exception as error:
+
         return None, "STATE ERROR: " + str(error)
 
 
+# -------------------------------------
+# OPEN POSITION STATUS
+# -------------------------------------
+
 def position_info(state):
+
     if state is None:
         return "UNKNOWN"
 
+    # Includes "trade" for Candlestick Bible.
     for key in [
         "position",
+        "trade",
         "open_position",
         "positions",
         "open_positions",
     ]:
+
         if key not in state:
             continue
 
@@ -131,13 +169,19 @@ def position_info(state):
             return str(len(value))
 
         if isinstance(value, dict):
+
             if not value:
                 return "NONE"
 
-            # Some scanners store positions by symbol.
-            if "side" in value or "entry" in value:
+            # Single trade dictionary
+            if (
+                "side" in value
+                or "entry" in value
+                or "entry_price" in value
+            ):
                 return "1"
 
+            # Multiple positions by symbol
             return str(len(value))
 
         if isinstance(value, bool):
@@ -148,7 +192,12 @@ def position_info(state):
     return "UNKNOWN"
 
 
+# -------------------------------------
+# PAPER EQUITY
+# -------------------------------------
+
 def state_equity(state):
+
     if state is None:
         return ""
 
@@ -162,25 +211,58 @@ def state_equity(state):
     return "" if result is None else round(result, 2)
 
 
+# -------------------------------------
+# LAST PROCESSED CANDLE
+# -------------------------------------
+
+def last_candle(state):
+
+    if state is None:
+        return ""
+
+    return get_value(
+        state,
+        [
+            "last_bar",
+            "last_processed",
+            "last_candle",
+            "last_timestamp",
+        ]
+    ) or ""
+
+
+# -------------------------------------
+# LOAD TRADE CSV
+# -------------------------------------
+
 def load_trades(path):
+
     if path is None:
         return None, "TRADES CSV NOT FOUND"
 
     try:
+
         with path.open(
             encoding="utf-8-sig",
             newline=""
         ) as file:
+
             reader = csv.DictReader(file)
             rows = list(reader)
 
         return rows, "CSV FOUND"
 
     except Exception as error:
+
         return None, "CSV ERROR: " + str(error)
 
 
+# -------------------------------------
+# CLOSED TRADE CHECK
+# -------------------------------------
+
 def is_closed(row):
+
     status = str(
         get_value(
             row,
@@ -206,7 +288,11 @@ def is_closed(row):
 
     exit_time = get_value(
         row,
-        ["exit_time", "closed_at", "exit_timestamp"]
+        [
+            "exit_time",
+            "closed_at",
+            "exit_timestamp",
+        ]
     )
 
     exit_price = get_value(
@@ -217,7 +303,12 @@ def is_closed(row):
     return bool(exit_time or exit_price)
 
 
+# -------------------------------------
+# NET PROFIT / LOSS
+# -------------------------------------
+
 def trade_pnl(row):
+
     return to_number(
         get_value(
             row,
@@ -237,7 +328,12 @@ def trade_pnl(row):
     )
 
 
+# -------------------------------------
+# BUILD COMBINED REPORT
+# -------------------------------------
+
 def build_report():
+
     summary = []
     all_trades = []
 
@@ -251,6 +347,7 @@ def build_report():
 
         open_position = position_info(state)
         equity = state_equity(state)
+        candle = last_candle(state)
 
         closed = []
         wins = 0
@@ -259,6 +356,7 @@ def build_report():
         pnl_values = []
 
         if rows is not None:
+
             closed = [
                 row for row in rows
                 if is_closed(row)
@@ -270,36 +368,50 @@ def build_report():
 
                 if pnl is None:
                     unknown_pnl += 1
+
                 else:
+
                     pnl_values.append(pnl)
 
                     if pnl > 0:
                         wins += 1
+
                     elif pnl < 0:
                         losses += 1
 
                 all_trades.append({
                     "scanner": scanner,
+
                     "symbol": get_value(
                         row,
-                        ["symbol", "stock", "ticker", "pair"]
+                        [
+                            "symbol",
+                            "stock",
+                            "ticker",
+                            "pair",
+                        ]
                     ) or "",
+
                     "strategy": get_value(
                         row,
                         ["strategy", "setup"]
                     ) or "",
+
                     "side": get_value(
                         row,
                         ["side", "direction"]
                     ) or "",
+
                     "entry_time": get_value(
                         row,
                         ["entry_time", "entry_at"]
                     ) or "",
+
                     "exit_time": get_value(
                         row,
                         ["exit_time", "closed_at"]
                     ) or "",
+
                     "net_pnl_inr": (
                         ""
                         if pnl is None
@@ -308,44 +420,72 @@ def build_report():
                 })
 
         if rows is None:
+
             closed_count = ""
             net_pnl = ""
             win_rate = ""
             data_status = csv_status
 
         else:
+
             closed_count = len(closed)
 
             if unknown_pnl:
+
                 net_pnl = ""
                 data_status = "PARTIAL PNL"
+
             else:
-                net_pnl = round(sum(pnl_values), 2)
+
+                net_pnl = round(
+                    sum(pnl_values), 2
+                )
+
                 data_status = "CSV FOUND"
 
             decisive = wins + losses
 
             win_rate = (
-                round(wins / decisive * 100, 2)
+                round(
+                    wins / decisive * 100, 2
+                )
                 if decisive
                 else ""
             )
 
         summary.append({
+
             "scanner": scanner,
+
             "state_status": state_status,
+
             "trade_data_status": data_status,
+
             "open_position": open_position,
+
+            "last_candle": candle,
+
             "closed_trades": closed_count,
-            "wins": wins if rows is not None else "",
-            "losses": losses if rows is not None else "",
+
+            "wins": (
+                wins if rows is not None else ""
+            ),
+
+            "losses": (
+                losses if rows is not None else ""
+            ),
+
             "win_rate_pct": win_rate,
+
             "net_pnl_inr": net_pnl,
+
             "paper_equity_inr": equity,
+
             "state_file": (
                 state_path.name
                 if state_path else ""
             ),
+
             "trades_file": (
                 trades_path.name
                 if trades_path else ""
@@ -357,13 +497,19 @@ def build_report():
         print("STATE:", state_status)
         print("TRADE DATA:", data_status)
         print("OPEN POSITION:", open_position)
+        print("LAST CANDLE:", candle)
         print("CLOSED TRADES:", closed_count)
         print("NET P/L INR:", net_pnl)
 
     return summary, all_trades
 
 
+# -------------------------------------
+# SAVE CSV
+# -------------------------------------
+
 def save_csv(path, rows, columns):
+
     with path.open(
         "w",
         encoding="utf-8-sig",
@@ -379,7 +525,12 @@ def save_csv(path, rows, columns):
         writer.writerows(rows)
 
 
+# -------------------------------------
+# CREATE HTML DASHBOARD
+# -------------------------------------
+
 def create_html(summary):
+
     now = datetime.now(IST).strftime(
         "%d-%m-%Y %I:%M %p IST"
     )
@@ -389,6 +540,7 @@ def create_html(summary):
         "state_status",
         "trade_data_status",
         "open_position",
+        "last_candle",
         "closed_trades",
         "wins",
         "losses",
@@ -401,6 +553,7 @@ def create_html(summary):
         "State",
         "Trade CSV",
         "Open Position",
+        "Last Candle",
         "Closed",
         "Wins",
         "Losses",
@@ -409,6 +562,7 @@ def create_html(summary):
     ]
 
     def display(value):
+
         if value == "" or value is None:
             return "UNKNOWN"
 
@@ -417,9 +571,11 @@ def create_html(summary):
     table_rows = ""
 
     for item in summary:
+
         table_rows += "<tr>"
 
         for key in columns:
+
             table_rows += (
                 "<td>"
                 + display(item.get(key))
@@ -434,6 +590,7 @@ def create_html(summary):
     )
 
     if all_complete:
+
         combined = round(
             sum(
                 item["net_pnl_inr"]
@@ -443,7 +600,9 @@ def create_html(summary):
         )
 
         combined_text = f"INR {combined:,.2f}"
+
     else:
+
         combined_text = (
             "UNKNOWN - Some trade CSVs "
             "are missing or incomplete"
@@ -518,16 +677,17 @@ Combined Net P/L: {escape(combined_text)}
 </table>
 
 <div class="note">
-State file found does not prove scanner is
-currently running.
+State file found does not prove scanner
+is currently running.
 
-Missing trade CSV does not mean zero trades
-or zero profit.
+Missing trade CSV does not mean zero
+trades or zero profit.
 
-Only recorded closed paper trades are counted.
+Only recorded closed paper trades
+are counted.
 
-Yahoo Finance paper trading is not actual
-Zerodha execution.
+Yahoo Finance paper trading is not
+actual Zerodha execution.
 </div>
 
 </body>
@@ -540,7 +700,12 @@ Zerodha execution.
     )
 
 
+# -------------------------------------
+# MAIN
+# -------------------------------------
+
 def main():
+
     print("=" * 55)
     print("THREE NSE EQUITY SCANNERS REPORT")
     print("=" * 55)
@@ -555,6 +720,7 @@ def main():
             "state_status",
             "trade_data_status",
             "open_position",
+            "last_candle",
             "closed_trades",
             "wins",
             "losses",
