@@ -1,9 +1,12 @@
 {
-  "last_bar": 1792845000000,
+  "last_bar": 1793067000000,
   "setup": null,
   "positions": [],
   "closed": 0,
   "wins": 0,
   "losses": 0,
-  "net_pct": 0.0
+  "net_pct": 0.0,
+  "r_sum": 0.0,
+  "pnl_usdt": 0.0,
+  "cooldown_until": 0
 }
