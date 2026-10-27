@@ -10,7 +10,7 @@
       "target": 761.3,
       "risk": 7.149999999999977,
       "entry_time_utc": "2026-10-26T09:40+00:00",
-      "last_checked_t": 1793132400000
+      "last_checked_t": 1793134500000
     },
     {
       "symbol": "BNBUSDT",
@@ -22,7 +22,7 @@
       "target": 768.4499999999999,
       "risk": 7.149999999999977,
       "entry_time_utc": "2026-10-26T09:40+00:00",
-      "last_checked_t": 1793132400000
+      "last_checked_t": 1793134500000
     }
   ],
   "entered_days": {
@@ -32,9 +32,9 @@
     "ETHUSDT": "2026-10-26"
   },
   "last_closed_bar": {
-    "BTCUSDT": 1793132400000,
-    "ETHUSDT": 1793132400000,
-    "SOLUSDT": 1793132400000,
-    "BNBUSDT": 1793132400000
+    "BTCUSDT": 1793134500000,
+    "ETHUSDT": 1793134500000,
+    "SOLUSDT": 1793134500000,
+    "BNBUSDT": 1793134500000
   }
 }
