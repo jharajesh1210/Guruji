@@ -12,3 +12,7 @@ time,pair,direction,reason,range_pct,sweep_depth_pct
 2026-10-27T21:45:00+00:00,B-AAVE_USDT,LONG,max_entries_per_bar,,
 2026-10-27T21:45:00+00:00,B-RENDER_USDT,LONG,max_entries_per_bar,,
 2026-10-27T21:45:00+00:00,B-APT_USDT,LONG,max_entries_per_bar,,
+2026-10-27T22:15:00+00:00,B-TAO_USDT,SHORT,max_open_trades,1.533,0.267
+2026-10-27T22:15:00+00:00,B-QNT_USDT,SHORT,max_open_trades,1.89,0.094
+2026-10-27T22:15:00+00:00,B-AAVE_USDT,SHORT,max_open_trades,1.097,0.285
+2026-10-27T22:15:00+00:00,B-APT_USDT,SHORT,max_open_trades,1.165,0.506
