@@ -68,7 +68,7 @@ TRADE_HOURS_UTC = (7, 20)  # start inclusive, end exclusive
 COOLDOWN_BARS = 12         # loss ke baad 12 x 5m = 1 ghanta
 
 MAX_ENTRY_LAG_BARS = 2     # purani candle pe naya entry nahi
-MAX_CATCHUP = 288          # 1 din tak ki missed candles process karo
+MAX_CATCHUP = 288          # isse bada gap: no position = fast-forward, position = sab process
 
 CANDLE_5M_MS = 5 * 60 * 1000
 CANDLE_1H_MS = 60 * 60 * 1000
@@ -680,16 +680,30 @@ def main():
         print("NO NEW COMPLETED 5M CANDLE")
         return
 
-    if len(new_indices) > MAX_CATCHUP:
-        warning = (
-            f"BTC SMC PAPER WARNING: {len(new_indices)} candles missed, "
-            f"sirf last {MAX_CATCHUP} process ho rahi hain."
-        )
-        print(warning)
-        send_telegram(warning)
-        new_indices = new_indices[-MAX_CATCHUP:]
-
     latest_time = int(df5.iloc[-1]["time"])
+
+    if len(new_indices) > MAX_CATCHUP:
+        if not state["positions"]:
+            # Koi open position nahi: purani candles process karne ka
+            # fayda nahi (entry stale hoti). Seedha latest candle tak
+            # fast-forward, purana adhura setup hata do.
+            print(
+                f"INFO: {len(new_indices)} candles ka gap, koi open "
+                "position nahi - fast-forward to latest candle"
+            )
+            state["setup"] = None
+            state["last_bar"] = latest_time
+            save_state(state)
+            print("Waiting for next completed 5m candle")
+            return
+
+        # Open position hai: saari candles process karo taaki
+        # stop / target / trail miss na ho. Naye entry 'fresh' check
+        # se apne aap block rahenge.
+        print(
+            f"INFO: {len(new_indices)} candles ka gap, open position hai "
+            "- sab candles process ho rahi hain (exits ke liye)"
+        )
 
     for i in new_indices:
         bar = df5.iloc[i]
