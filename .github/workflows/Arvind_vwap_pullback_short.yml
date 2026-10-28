@@ -1,0 +1,89 @@
+
+name: ARVIND RELIANCE VWAP PULLBACK SHORT
+
+on:
+  workflow_dispatch:
+    inputs:
+      data_source:
+        description: "CSV or Angel One"
+        required: true
+        default: "csv"
+        type: choice
+        options:
+          - csv
+          - angel
+
+  schedule:
+    - cron: "20 10 * * 1-5"
+
+permissions:
+  contents: read
+
+jobs:
+  reliance-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy
+
+      - name: Verify Python File
+        run: |
+          test -f Arvind_vwap_pullback_short.py
+          python -m py_compile Arvind_vwap_pullback_short.py
+
+      - name: Run RELIANCE Strategy
+        env:
+          DATA_SOURCE: ${{ inputs.data_source || 'csv' }}
+          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: |
+          set -e
+
+          if [ "$DATA_SOURCE" = "angel" ]; then
+            pip install smartapi-python pyotp logzero websocket-client
+
+            for key in ANGEL_API_KEY ANGEL_CLIENT_ID ANGEL_PASSWORD ANGEL_TOTP_SECRET; do
+              if [ -z "${!key}" ]; then
+                echo "::error::Missing Angel One secret: $key"
+                exit 1
+              fi
+            done
+
+            python -u Arvind_vwap_pullback_short.py \
+              --angel \
+              --days 30 \
+              --out ARVIND_RELIANCE_TRADES.csv
+
+          else
+            if [ ! -f RELIANCE_5m.csv ] || [ ! -f NIFTY_5m.csv ]; then
+              echo "::error::RELIANCE_5m.csv and NIFTY_5m.csv required"
+              exit 1
+            fi
+
+            python -u Arvind_vwap_pullback_short.py \
+              --reliance RELIANCE_5m.csv \
+              --nifty NIFTY_5m.csv \
+              --out ARVIND_RELIANCE_TRADES.csv
+          fi
+
+      - name: Upload Backtest Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARVIND_RELIANCE_RESULTS
+          path: ARVIND_RELIANCE_TRADES.csv
+          if-no-files-found: warn
