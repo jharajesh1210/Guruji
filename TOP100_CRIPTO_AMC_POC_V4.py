@@ -1,9 +1,9 @@
-"""TOP100 CoinDCX Futures AMD + approximate POC forward PAPER scanner (V5).
+"""TOP100 CoinDCX Futures AMD + approximate POC forward PAPER scanner (V4).
 No real orders. GitHub Actions can invoke every 15 minutes.
 
 V4.1: POC entry filter switched OFF (USE_POC_FILTER=False); poc_room_r still logged.
 
-V5 (data-driven from the first 20 closed V4 trades: 40% win, +8.24R; SL = 9 trades, -10.4R):
+V4 (data-driven from the first 20 closed V4 trades: 40% win, +8.24R; SL = 9 trades, -10.4R):
  A. range_pct > 1.5 skipped      (4 of 4 such trades were SL, no winner lost)
  B. sweep_depth_pct > 0.18 skipped (deep 'sweep' = real breakdown; 4 of 4 SL, no winner lost)
  C. POC more than 0.25R AHEAD of entry skipped (7 of 8 such trades were SL). This is the
@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-NAME = 'TOP100_CRIPTO_AMC_POC_V5'  # new name => fresh state/CSVs (old V4 files untouched)
+NAME = 'TOP100_CRIPTO_AMC_POC_V4'  # new name => fresh state/CSVs (old V4 files untouched)
 STATE = Path(NAME + '_state.json')
 TRADES = Path(NAME + '_trades.csv')
 SIGNALS = Path(NAME + '_signals.csv')
