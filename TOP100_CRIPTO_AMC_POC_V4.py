@@ -1,19 +1,21 @@
-"""TOP100 CoinDCX Futures AMD + approximate POC forward PAPER scanner (V4.1).
+"""TOP100 CoinDCX Futures AMD + approximate POC forward PAPER scanner (V5).
 No real orders. GitHub Actions can invoke every 15 minutes.
 
 V4.1: POC entry filter switched OFF (USE_POC_FILTER=False); poc_room_r still logged.
 
-V4 changes vs V3:
- 1. BTC filter (1h/4h shock + direction alignment)
- 2. Max entries per 15m bar + max open trades (correlation control)
- 3. Risk % min/max filter (fees vs risk) + ATR buffer on stop
- 4. POC used as a filter (room to the POC magnet)
- 5. Accumulation range also relative to hourly ATR
- 6. Turnover = average of last N hourly candles
- 7. Entry delay 14 min, fill from latest closed 5m candle
- 8. Breakeven-ish lock at 1R before the 2R/3R locks
- 9. Rich logging: R-multiple, MFE/MAE, BTC move, range, sweep depth, risk, hour, signals per bar
-10. Skipped signals logged with reason
+V5 (data-driven from the first 20 closed V4 trades: 40% win, +8.24R; SL = 9 trades, -10.4R):
+ A. range_pct > 1.5 skipped      (4 of 4 such trades were SL, no winner lost)
+ B. sweep_depth_pct > 0.18 skipped (deep 'sweep' = real breakdown; 4 of 4 SL, no winner lost)
+ C. POC more than 0.25R AHEAD of entry skipped (7 of 8 such trades were SL). This is the
+    opposite of the old V4 POC idea, which wanted POC far ahead.
+    Together A+B+C on the V4 data: 20 trades +8.24R -> 12 trades +12.5R. Only 20 trades:
+    treat as a hypothesis, check skipped.csv + trades.csv after ~30 new trades.
+ D. 1R lock moved from +0.10R to +0.25R so fees+slippage no longer turn 'BE' into a loss.
+ E. Confirm-candle quality (close strength / volume ratio) and chase_r are LOGGED;
+    quality filter is OFF until the new columns prove useful.
+ F. Telegram/state show result counts (TP/TRAIL/BE/SL), avg R per trade, last-10 R.
+ Tested and rejected on V4 data: 1 entry per bar (-2.5R), BTC 4h 'alignment' (wrong sign).
+ NOTE: new NAME => new state/CSV files. Update the workflow's file names.
 """
 import csv
 import json
@@ -28,7 +30,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-NAME = 'TOP100_CRIPTO_AMC_POC_V4'  # new name => fresh state/CSVs (old V3 files untouched)
+NAME = 'TOP100_CRIPTO_AMC_POC_V5'  # new name => fresh state/CSVs (old V4 files untouched)
 STATE = Path(NAME + '_state.json')
 TRADES = Path(NAME + '_trades.csv')
 SIGNALS = Path(NAME + '_signals.csv')
@@ -48,7 +50,15 @@ RR_VALUES = (4,)
 FEE_SIDE = 0.0005
 SLIP_SIDE = 0.0002
 ENTRY_MAX_DELAY_MIN = 14        # GitHub cron is often late
-MAX_ENTRY_DEVIATION_PCT = 0.30  # latest 5m close vs confirm-bar close
+MAX_ENTRY_DEVIATION_PCT = 0.30  # latest 5m close vs confirm-bar close (abs sanity gate)
+MAX_CHASE_R = 0.35              # adverse move since confirm close, in R of the trade
+MAX_TRADE_RANGE_PCT = 1.5       # V4 data: range 1.5-2.0% => 4 of 4 SL
+MAX_SWEEP_DEPTH_PCT = 0.18      # V4 data: depth > 0.18% => 4 of 4 SL
+USE_POC_AHEAD_FILTER = True     # skip if POC is further than POC_MAX_AHEAD_R ahead of entry
+POC_MAX_AHEAD_R = 0.25          # V4 data: poc_room_r > 0.25 => 7 of 8 SL
+USE_CONFIRM_QUALITY = False  # log only until validated
+MIN_CLOSE_STRENGTH = 0.60       # confirm bar must close in top 60% (LONG) / bottom 40% (SHORT)
+MIN_CONFIRM_VOL_RATIO = 1.0     # confirm bar volume / mean of previous 8 bars
 CONFIRM_BUFFER = 0.0008
 SL_ATR_BUFFER = 0.15            # extra stop distance beyond wick, in hourly ATR
 MIN_RISK_PCT = 0.40             # below this fees eat the trade
@@ -63,8 +73,9 @@ USE_POC_FILTER = False
 POC_MIN_R = 0.5                 # POC must be >= 0.5R away on the profit side
 
 # ---------------- Correlation / BTC filter ----------------
-MAX_ENTRIES_PER_BAR = 2
+MAX_ENTRIES_PER_BAR = 2         # 1 per bar tested worse on V4 data
 MAX_OPEN_TRADES = 4
+MAX_SAME_DIR_OPEN = 4           # = off; lower it if same-direction clusters keep losing
 USE_BTC_FILTER = True
 BTC_PAIR = 'B-BTC_USDT'
 BTC_MAX_1H_PCT = 1.5            # skip all entries if |BTC 1h| larger
@@ -76,7 +87,7 @@ SKIP_HOURS_UTC = ()             # e.g. (20, 21, 22, 23) once you have data
 
 # ---------------- Trailing ----------------
 # reached R -> locked stop in R. Lock activates from the NEXT 5m candle.
-TRAIL_STEPS = {1: 0.1, 2: 2.0, 3: 3.0}
+TRAIL_STEPS = {1: 0.25, 2: 2.0, 3: 3.0}
 FINAL_RR = 4
 
 MAX_WORKERS = 5
@@ -97,7 +108,7 @@ def request_json(url, params=None):
         try:
             response = requests.get(
                 url, params=params, timeout=25,
-                headers={'User-Agent': 'Top100-AMC-POC-Paper/4.0'}
+                headers={'User-Agent': 'Top100-AMC-POC-Paper/5.0'}
             )
             response.raise_for_status()
             return response.json()
@@ -135,7 +146,9 @@ def initial_state():
         'closed_count': 0,
         'closed_wins': 0,
         'net_return_sum_pct': 0.0,
-        'net_r_sum': 0.0
+        'net_r_sum': 0.0,
+        'result_counts': {},
+        'recent_r': []
     }
 
 
@@ -413,6 +426,8 @@ def try_open_paper(state, sig, btc, bar_signals):
         return skip('already_open')
     if len(state['open_trades']) >= MAX_OPEN_TRADES:
         return skip('max_open_trades')
+    if sum(1 for t in state['open_trades'] if t['direction'] == direction) >= MAX_SAME_DIR_OPEN:
+        return skip('max_same_direction')
     if bar_end.hour in SKIP_HOURS_UTC:
         return skip('time_filter')
 
@@ -425,6 +440,19 @@ def try_open_paper(state, sig, btc, bar_signals):
             return skip('btc_against_long')
         if direction == 'SHORT' and btc['btc_1h'] > BTC_ALIGN_PCT:
             return skip('btc_against_short')
+
+    if sig['range_pct'] > MAX_TRADE_RANGE_PCT:
+        return skip('range_too_wide')
+    if sig['sweep_depth_pct'] > MAX_SWEEP_DEPTH_PCT:
+        return skip('sweep_too_deep')
+
+    if USE_CONFIRM_QUALITY:
+        strength = sig.get('close_strength')
+        vol_ratio = sig.get('vol_ratio')
+        if strength is not None and strength < MIN_CLOSE_STRENGTH:
+            return skip(f'weak_confirm_close_{strength:.2f}')
+        if vol_ratio is not None and vol_ratio < MIN_CONFIRM_VOL_RATIO:
+            return skip(f'low_confirm_volume_{vol_ratio:.2f}')
 
     sign = 1 if direction == 'LONG' else -1
     entry = entry_raw * (1 + SLIP_SIDE if sign == 1 else 1 - SLIP_SIDE)
@@ -439,6 +467,14 @@ def try_open_paper(state, sig, btc, bar_signals):
         return skip(f'risk_too_small_{risk_pct:.2f}')
     if risk_pct > MAX_RISK_PCT:
         return skip(f'risk_too_large_{risk_pct:.2f}')
+
+    confirm_close = sig.get('confirm_close')
+    chase_r = sign * (entry_raw - confirm_close) / risk if confirm_close and risk > 0 else 0.0
+    if chase_r > MAX_CHASE_R:
+        return skip(f'chased_entry_{chase_r:.2f}R')
+
+    if USE_POC_AHEAD_FILTER and sign * (poc - entry) / risk > POC_MAX_AHEAD_R:
+        return skip(f'poc_too_far_ahead_{sign * (poc - entry) / risk:.2f}R')
 
     if USE_POC_FILTER:
         room_r = sign * (poc - entry) / risk
@@ -465,7 +501,10 @@ def try_open_paper(state, sig, btc, bar_signals):
             'risk_pct': round(risk_pct, 3),
             'hour_utc': bar_end.hour,
             'signals_in_bar': bar_signals,
-            'poc_room_r': round(sign * (poc - entry) / risk, 2)
+            'poc_room_r': round(sign * (poc - entry) / risk, 2),
+            'close_strength': round(sig['close_strength'], 3) if sig.get('close_strength') is not None else None,
+            'vol_ratio': round(sig['vol_ratio'], 3) if sig.get('vol_ratio') is not None else None,
+            'chase_r': round(chase_r, 3)
         }
     }
     state['open_trades'].append(trade)
@@ -483,7 +522,7 @@ def try_open_paper(state, sig, btc, bar_signals):
         f'PAPER ENTRY | {NAME}\n{pair} {direction}\n'
         f'Entry approx: {entry:.8g}\nOriginal SL: {stop:.8g} ({risk_pct:.2f}%)\n'
         f'TP 1:{FINAL_RR}: {trade["target"]:.8g}\n'
-        'Locks: 1R->SL ~entry, 2R->SL 2R, 3R->SL 3R.\n'
+        'Locks: 1R->SL +0.25R, 2R->SL 2R, 3R->SL 3R.\n'
         'No real order.'
     )
     LOG.info('PAPER ENTRY %s %s at %s', pair, direction, iso(bar_end))
@@ -579,6 +618,11 @@ def settle_trades(state, cached_5m):
         state['closed_wins'] += int(net > 0)
         state['net_return_sum_pct'] += net
         state['net_r_sum'] = state.get('net_r_sum', 0.0) + net_r
+        counts = state.setdefault('result_counts', {})
+        counts[result] = counts.get(result, 0) + 1
+        recent = state.setdefault('recent_r', [])
+        recent.append(round(net_r, 3))
+        del recent[:-10]
 
         row = {
             'trade_id': trade['id'], 'pair': pair,
@@ -601,7 +645,9 @@ def settle_trades(state, cached_5m):
             f'Net return: {net:+.2f}% ({net_r:+.2f}R)\n'
             f'MFE {trade.get("mfe_r", 0):.2f}R / MAE {trade.get("mae_r", 0):.2f}R\n'
             f'Closed: {state["closed_count"]} | Win rate: {rate:.1f}%\n'
-            f'Total: {state["net_r_sum"]:+.2f}R\nNo real order.'
+            f'Total: {state["net_r_sum"]:+.2f}R | Avg: {state["net_r_sum"] / state["closed_count"]:+.2f}R/trade\n'
+            f'Last {len(recent)}: {sum(recent):+.2f}R\n'
+            f'Results: {", ".join(f"{k} {v}" for k, v in sorted(counts.items()))}\nNo real order.'
         )
         LOG.info('PAPER EXIT %s %s %.2f%% %.2fR', trade['id'], result, net, net_r)
 
@@ -664,7 +710,17 @@ def process_coin(state, coin, cached_5m, signals_out):
                 if deviation > MAX_ENTRY_DEVIATION_PCT:
                     log_skip(pair, direction, end, f'entry_ran_away_{deviation:.2f}pct')
                 else:
+                    rng = float(bar['high']) - float(bar['low'])
+                    pos = (float(bar['close']) - float(bar['low'])) / rng if rng > 0 else 0.5
+                    strength = pos if direction == 'LONG' else 1 - pos
+                    prev_vol = bars[bars.index < start].tail(8)['volume'].mean()
+                    vol_ratio = (
+                        float(bar['volume']) / float(prev_vol)
+                        if pd.notna(prev_vol) and prev_vol > 0 else None
+                    )
                     signals_out.append({
+                        'confirm_close': float(bar['close']),
+                        'close_strength': float(strength), 'vol_ratio': vol_ratio,
                         'pair': pair, 'rank': coin['rank'], 'direction': direction,
                         'bar_end': end, 'raw_entry': fill, 'stop': pending['stop'],
                         'fill_next_5m': (
