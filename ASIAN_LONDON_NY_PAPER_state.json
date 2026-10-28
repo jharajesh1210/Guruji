@@ -1,78 +1,5 @@
 {
-  "positions": [
-    {
-      "symbol": "BTCUSDT",
-      "direction": "SELL",
-      "leg": "2R",
-      "entry": 80788.5,
-      "stop": 81208.0,
-      "initial_stop": 81208.0,
-      "target": 79949.5,
-      "risk": 419.5,
-      "entry_time_utc": "2026-10-28T12:40+00:00",
-      "last_checked_t": 1793210700000
-    },
-    {
-      "symbol": "BTCUSDT",
-      "direction": "SELL",
-      "leg": "3R",
-      "entry": 80788.5,
-      "stop": 81208.0,
-      "initial_stop": 81208.0,
-      "target": 79530.0,
-      "risk": 419.5,
-      "entry_time_utc": "2026-10-28T12:40+00:00",
-      "last_checked_t": 1793210700000
-    },
-    {
-      "symbol": "BTCUSDT",
-      "direction": "SELL",
-      "leg": "4R",
-      "entry": 80788.5,
-      "stop": 81208.0,
-      "initial_stop": 81208.0,
-      "target": 79110.5,
-      "risk": 419.5,
-      "entry_time_utc": "2026-10-28T12:40+00:00",
-      "last_checked_t": 1793210700000
-    },
-    {
-      "symbol": "SOLUSDT",
-      "direction": "SELL",
-      "leg": "2R",
-      "entry": 101.13,
-      "stop": 102.48,
-      "initial_stop": 102.48,
-      "target": 98.42999999999998,
-      "risk": 1.3500000000000085,
-      "entry_time_utc": "2026-10-28T13:55+00:00",
-      "last_checked_t": 1793210700000
-    },
-    {
-      "symbol": "SOLUSDT",
-      "direction": "SELL",
-      "leg": "3R",
-      "entry": 101.13,
-      "stop": 102.48,
-      "initial_stop": 102.48,
-      "target": 97.07999999999997,
-      "risk": 1.3500000000000085,
-      "entry_time_utc": "2026-10-28T13:55+00:00",
-      "last_checked_t": 1793210700000
-    },
-    {
-      "symbol": "SOLUSDT",
-      "direction": "SELL",
-      "leg": "4R",
-      "entry": 101.13,
-      "stop": 102.48,
-      "initial_stop": 102.48,
-      "target": 95.72999999999996,
-      "risk": 1.3500000000000085,
-      "entry_time_utc": "2026-10-28T13:55+00:00",
-      "last_checked_t": 1793210700000
-    }
-  ],
+  "positions": [],
   "entered_days": {
     "SOLUSDT": "2026-10-28",
     "BNBUSDT": "2026-10-26",
@@ -80,9 +7,9 @@
     "ETHUSDT": "2026-10-28"
   },
   "last_closed_bar": {
-    "BTCUSDT": 1793210700000,
-    "ETHUSDT": 1793210700000,
-    "SOLUSDT": 1793210700000,
-    "BNBUSDT": 1793210700000
+    "BTCUSDT": 1793213400000,
+    "ETHUSDT": 1793213400000,
+    "SOLUSDT": 1793213400000,
+    "BNBUSDT": 1793213400000
   }
 }
