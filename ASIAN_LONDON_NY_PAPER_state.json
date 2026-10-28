@@ -5,36 +5,24 @@
       "direction": "BUY",
       "leg": "4R",
       "entry": 739.85,
-      "stop": 732.7,
+      "stop": 754.15,
       "initial_stop": 732.7,
       "target": 768.4499999999999,
       "risk": 7.149999999999977,
       "entry_time_utc": "2026-10-26T09:40+00:00",
-      "last_checked_t": 1793182800000
-    },
-    {
-      "symbol": "ETHUSDT",
-      "direction": "SELL",
-      "leg": "2R",
-      "entry": 2369.52,
-      "stop": 2373.46,
-      "initial_stop": 2373.46,
-      "target": 2361.64,
-      "risk": 3.9400000000000546,
-      "entry_time_utc": "2026-10-28T10:15+00:00",
-      "last_checked_t": 1793182500000
+      "last_checked_t": 1793185500000
     },
     {
       "symbol": "ETHUSDT",
       "direction": "SELL",
       "leg": "3R",
       "entry": 2369.52,
-      "stop": 2373.46,
+      "stop": 2365.58,
       "initial_stop": 2373.46,
       "target": 2357.7,
       "risk": 3.9400000000000546,
       "entry_time_utc": "2026-10-28T10:15+00:00",
-      "last_checked_t": 1793182500000
+      "last_checked_t": 1793185500000
     },
     {
       "symbol": "ETHUSDT",
@@ -46,7 +34,7 @@
       "target": 2353.7599999999998,
       "risk": 3.9400000000000546,
       "entry_time_utc": "2026-10-28T10:15+00:00",
-      "last_checked_t": 1793182500000
+      "last_checked_t": 1793185500000
     }
   ],
   "entered_days": {
@@ -56,9 +44,9 @@
     "ETHUSDT": "2026-10-28"
   },
   "last_closed_bar": {
-    "BTCUSDT": 1793182800000,
-    "ETHUSDT": 1793182800000,
-    "SOLUSDT": 1793182800000,
-    "BNBUSDT": 1793182800000
+    "BTCUSDT": 1793185500000,
+    "ETHUSDT": 1793185500000,
+    "SOLUSDT": 1793185500000,
+    "BNBUSDT": 1793185500000
   }
 }
