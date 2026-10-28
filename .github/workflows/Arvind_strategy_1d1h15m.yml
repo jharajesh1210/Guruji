@@ -1,0 +1,66 @@
+
+name: ARVIND BTC PAXG 1D 1H 15M BACKTEST
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crypto-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy
+
+      - name: Verify Python File
+        run: |
+          test -f Arvind_strategy_1d1h15m.py
+          python -m py_compile Arvind_strategy_1d1h15m.py
+
+      - name: Verify Market Data
+        run: |
+          test -f BTCUSDT_15m.csv || {
+            echo "::error::BTCUSDT_15m.csv not found"
+            exit 1
+          }
+
+          test -f PAXGUSDT_15m.csv || {
+            echo "::error::PAXGUSDT_15m.csv not found"
+            exit 1
+          }
+
+      - name: Run BTC Backtest
+        run: |
+          python -u Arvind_strategy_1d1h15m.py \
+            BTC BTCUSDT_15m.csv \
+            | tee ARVIND_BTC_RESULT.txt
+
+      - name: Run PAXG Backtest
+        run: |
+          python -u Arvind_strategy_1d1h15m.py \
+            PAXG PAXGUSDT_15m.csv \
+            | tee ARVIND_PAXG_RESULT.txt
+
+      - name: Upload Backtest Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARVIND_BTC_PAXG_RESULTS
+          path: |
+            ARVIND_BTC_RESULT.txt
+            ARVIND_PAXG_RESULT.txt
+          if-no-files-found: warn
