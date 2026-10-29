@@ -1,18 +1,27 @@
 
-name: ARVIND BTC PAXG 1D 1H 15M BACKTEST
+name: crypto-backtest
 
 on:
   workflow_dispatch:
 
+  schedule:
+    # Daily 06:30 AM IST
+    - cron: "0 1 * * *"
+
 permissions:
   contents: read
+
+concurrency:
+  group: crypto-backtest
+  cancel-in-progress: false
 
 jobs:
   crypto-backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -24,43 +33,210 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy
+          python -m pip install pandas numpy requests
 
       - name: Verify Python File
+        shell: bash
         run: |
-          test -f Arvind_strategy_1d1h15m.py
-          python -m py_compile Arvind_strategy_1d1h15m.py
+          if [ -f "Arvind_strategy_1d1h15m.py" ]; then
+            echo "PYFILE=Arvind_strategy_1d1h15m.py" >> "$GITHUB_ENV"
+          elif [ -f "Arvind_strategy_1d1h15m(2).py" ]; then
+            echo "PYFILE=Arvind_strategy_1d1h15m(2).py" >> "$GITHUB_ENV"
+          else
+            echo "ERROR: Python strategy file not found"
+            exit 1
+          fi
+
+      - name: Download BTC and PAXG Market Data
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import requests
+          import pandas as pd
+          import time
+          from datetime import datetime, timezone, timedelta
+
+          BASE = "https://api.binance.com/api/v3/klines"
+
+          SYMBOLS = {
+              "BTCUSDT": "BTCUSDT_15m.csv",
+              "PAXGUSDT": "PAXGUSDT_15m.csv"
+          }
+
+          INTERVAL_MS = 15 * 60 * 1000
+          LOOKBACK_DAYS = 400
+
+          session = requests.Session()
+
+          end = datetime.now(timezone.utc)
+          start = end - timedelta(days=LOOKBACK_DAYS)
+
+          for symbol, filename in SYMBOLS.items():
+
+              print(f"Downloading {symbol}", flush=True)
+
+              start_ms = int(start.timestamp() * 1000)
+              end_ms = int(end.timestamp() * 1000)
+
+              rows = []
+
+              while start_ms < end_ms:
+
+                  params = {
+                      "symbol": symbol,
+                      "interval": "15m",
+                      "startTime": start_ms,
+                      "endTime": end_ms,
+                      "limit": 1000
+                  }
+
+                  data = None
+
+                  for attempt in range(5):
+                      try:
+                          response = session.get(
+                              BASE,
+                              params=params,
+                              timeout=30
+                          )
+                          response.raise_for_status()
+
+                          data = response.json()
+
+                          if not isinstance(data, list):
+                              raise RuntimeError(
+                                  f"Invalid response: {data}"
+                              )
+
+                          break
+
+                      except Exception as exc:
+                          print(
+                              f"{symbol} attempt {attempt + 1}: {exc}",
+                              flush=True
+                          )
+                          if attempt == 4:
+                              raise
+                          time.sleep(2 * (attempt + 1))
+
+                  if not data:
+                      break
+
+                  rows.extend(data)
+
+                  next_ms = int(data[-1][0]) + INTERVAL_MS
+
+                  if next_ms <= start_ms:
+                      raise RuntimeError(
+                          "Pagination did not advance"
+                      )
+
+                  start_ms = next_ms
+
+                  time.sleep(0.2)
+
+              if not rows:
+                  raise RuntimeError(
+                      f"No data downloaded for {symbol}"
+                  )
+
+              df = pd.DataFrame(rows)
+
+              df = df.iloc[:, :5].copy()
+
+              df.columns = [
+                  "time",
+                  "open",
+                  "high",
+                  "low",
+                  "close"
+              ]
+
+              df["time"] = pd.to_numeric(
+                  df["time"],
+                  errors="coerce"
+              )
+
+              for col in [
+                  "open", "high", "low", "close"
+              ]:
+                  df[col] = pd.to_numeric(
+                      df[col],
+                      errors="coerce"
+                  )
+
+              df = df.dropna()
+
+              df["time"] = df["time"].astype("int64")
+
+              df = df.drop_duplicates(
+                  subset=["time"]
+              ).sort_values("time")
+
+              now_ms = int(
+                  datetime.now(timezone.utc).timestamp()
+                  * 1000
+              )
+
+              # Exclude unfinished candles
+              df = df[
+                  df["time"] + INTERVAL_MS <= now_ms
+              ]
+
+              if len(df) < 2000:
+                  raise RuntimeError(
+                      f"Insufficient data for {symbol}: "
+                      f"{len(df)} candles"
+                  )
+
+              df.to_csv(filename, index=False)
+
+              print(
+                  f"SUCCESS: {filename} "
+                  f"with {len(df)} candles",
+                  flush=True
+              )
+
+          PYCODE
 
       - name: Verify Market Data
+        shell: bash
         run: |
-          test -f BTCUSDT_15m.csv || {
-            echo "::error::BTCUSDT_15m.csv not found"
+          test -s BTCUSDT_15m.csv || {
+            echo "ERROR: BTCUSDT_15m.csv not found"
             exit 1
           }
 
-          test -f PAXGUSDT_15m.csv || {
-            echo "::error::PAXGUSDT_15m.csv not found"
+          test -s PAXGUSDT_15m.csv || {
+            echo "ERROR: PAXGUSDT_15m.csv not found"
             exit 1
           }
+
+          echo "Both CSV files are ready"
 
       - name: Run BTC Backtest
+        shell: bash
         run: |
-          python -u Arvind_strategy_1d1h15m.py \
-            BTC BTCUSDT_15m.csv \
-            | tee ARVIND_BTC_RESULT.txt
+          set -o pipefail
+          python "$PYFILE" BTC BTCUSDT_15m.csv \
+            | tee BTC_strategy_report.txt
 
       - name: Run PAXG Backtest
+        shell: bash
         run: |
-          python -u Arvind_strategy_1d1h15m.py \
-            PAXG PAXGUSDT_15m.csv \
-            | tee ARVIND_PAXG_RESULT.txt
+          set -o pipefail
+          python "$PYFILE" PAXG PAXGUSDT_15m.csv \
+            | tee PAXG_strategy_report.txt
 
       - name: Upload Backtest Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ARVIND_BTC_PAXG_RESULTS
+          name: crypto-backtest-results
           path: |
-            ARVIND_BTC_RESULT.txt
-            ARVIND_PAXG_RESULT.txt
+            BTCUSDT_15m.csv
+            PAXGUSDT_15m.csv
+            BTC_strategy_report.txt
+            PAXG_strategy_report.txt
           if-no-files-found: warn
+          retention-days: 30
