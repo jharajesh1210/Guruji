@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: guruji-paper-scanners
+  group: btc-smc-news-impact
   cancel-in-progress: false
 
 jobs:
