@@ -50,7 +50,15 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
           NEWS_CALENDAR_URL: ${{ secrets.NEWS_CALENDAR_URL }}
         run: |
-          python -u BTC_SMC_Paper_NEWS_IMPACT.py
+          set +e
+          python -u BTC_SMC_Paper_NEWS_IMPACT.py > run.log 2>&1
+          CODE=$?
+          cat run.log
+          if [ "$CODE" -ne 0 ]; then
+            # Show the error on the GitHub run page (Annotations) so it can be read easily
+            echo "::error title=BTC news scanner error::$(tail -n 15 run.log | tr '\n' '|' | cut -c1-900)"
+          fi
+          exit $CODE
 
       - name: Save paper trading files
         if: success()
