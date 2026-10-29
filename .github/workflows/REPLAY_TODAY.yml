@@ -1,0 +1,104 @@
+name: REPLAY TEST (aaj ka din dobara)
+
+# Har paper bot ko chune hue din ki candles par shuru se chalata hai, jaise live chalta.
+# Bot ko har step par sirf us samay tak ka data milta hai. Telegram alerts record hote hain
+# aur end me ek report Telegram par jaati hai. Koi asli order / asli state change nahi.
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Date (YYYY-MM-DD, IST). Khali = aaj"
+        required: false
+        default: ""
+      telegram:
+        description: "Telegram par report bhejni hai?"
+        required: false
+        default: "yes"
+        type: choice
+        options: ["yes", "no"]
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { bot: ASIAN_LONDON_NY_ORIGINAL,   market: crypto, step: 5 }
+          - { bot: ASIAN_LONDON_NY_NEWS_IMPACT, market: crypto, step: 5 }
+          - { bot: BTC_SMC_ORIGINAL,           market: crypto, step: 5 }
+          - { bot: BTC_SMC_NEWS_IMPACT,        market: crypto, step: 5 }
+          - { bot: GOLD_COMBO_PAPER,           market: crypto, step: 5 }
+          - { bot: TOP100_ORIGINAL,            market: crypto, step: 15 }
+          - { bot: TOP100_NEWS_IMPACT,         market: crypto, step: 15 }
+          - { bot: TOP100_AMC_POC_V4,          market: crypto, step: 15 }
+          - { bot: NIFTY50_EQUITY,             market: nse,    step: 5 }
+          - { bot: RIL_CANDLESTICK_BIBLE,      market: nse,    step: 5 }
+          - { bot: RIL_TRADING_SYSTEM,         market: nse,    step: 5 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: python -m pip install -q requests pandas numpy yfinance
+
+      - name: Replay ${{ matrix.bot }}
+        env:
+          NEWS_CALENDAR_URL: ${{ secrets.NEWS_CALENDAR_URL }}
+        shell: bash
+        run: |
+          D="${{ github.event.inputs.date }}"
+          [ -z "$D" ] && D=$(TZ=Asia/Kolkata date +%F)
+          if [ "${{ matrix.market }}" = "crypto" ]; then
+            START=$(date -u -d "$D 00:00 +0530" +%Y-%m-%dT%H:%M:%S)
+            END=$(date -u -d "$D 23:55 +0530" +%Y-%m-%dT%H:%M:%S)
+          else
+            START=$(date -u -d "$D 09:15:30 +0530" +%Y-%m-%dT%H:%M:%S)
+            END=$(date -u -d "$D 15:35:30 +0530" +%Y-%m-%dT%H:%M:%S)
+          fi
+          echo "Replay $D | $START -> $END UTC | step ${{ matrix.step }} min"
+          # Alag copy: asli state/trade files ko haath nahi lagta, bot naye sire se shuru
+          W=$RUNNER_TEMP/rt
+          mkdir -p $W && cp -r . $W/ && cd $W
+          rm -f *_state.json *STATE*.json paper_state.json *_trades.csv *_TRADES.csv *_signals.csv \
+                *_SIGNALS.csv *_EVENTS.csv *_skipped.csv *_news_skips.csv
+          mkdir -p $GITHUB_WORKSPACE/out
+          python -u replay/replay_bot.py ${{ matrix.bot }} $START $END ${{ matrix.step }} \
+            $GITHUB_WORKSPACE/out/replay_${{ matrix.bot }}.json
+          cp -f *rades*.csv *RADES*.csv $GITHUB_WORKSPACE/out/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: replay-${{ matrix.bot }}
+          path: out/
+          retention-days: 7
+
+  report:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+      - name: Send Telegram report
+        env:
+          BOT_TOKEN: ${{ github.event.inputs.telegram != 'no' && secrets.BOT_TOKEN || '' }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          EXPECTED_BOTS: >-
+            ASIAN_LONDON_NY_ORIGINAL ASIAN_LONDON_NY_NEWS_IMPACT BTC_SMC_ORIGINAL BTC_SMC_NEWS_IMPACT
+            GOLD_COMBO_PAPER TOP100_ORIGINAL TOP100_NEWS_IMPACT TOP100_AMC_POC_V4
+            NIFTY50_EQUITY RIL_CANDLESTICK_BIBLE RIL_TRADING_SYSTEM
+        run: |
+          D="${{ github.event.inputs.date }}"
+          [ -z "$D" ] && D=$(TZ=Asia/Kolkata date +%F)
+          python replay/replay_report.py results "$D"
