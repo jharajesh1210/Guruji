@@ -29,14 +29,15 @@ def send(text):
 
 
 def kind(msg):
-    up = msg.upper()
+    """Bots ke message heading se pehchano: entry / exit / other (trailing, skip, pause)."""
+    up = msg.upper().strip()
     first = up.splitlines()[0] if up else ""
-    if any(w in first for w in ("EXIT",)) or any(w in up for w in ("SL HIT", "TARGET HIT", "STOP HIT")):
+    if any(w in first for w in ("TRAILING", "SKIPPED", "PAUSE", "REACHED", "LOCKED", "SUMMARY", "TEST")):
+        return "other"
+    if "EXIT" in first or "DELAYED EOD" in first:
         return "exit"
-    if any(w in first for w in ENTRY_WORDS) or "ENTRY" in up:
+    if "ENTRY" in first or "NIFTY50 CASH PAPER" in first or "PAPER SIGNAL" in first:
         return "entry"
-    if any(w in up for w in EXIT_WORDS):
-        return "exit"
     return "other"
 
 
@@ -83,7 +84,10 @@ def main():
         unit = "INR" if col == "net_inr" else ("%" if col and "pct" in col else "USDT")
         pnl_txt = f" | band trade: {rows} | P&L: {pnl:+.2f} {unit}" if rows else ""
         err = f" | error steps: {d['errors']}/{d['steps']}" if d["errors"] else ""
-        lines.append(f"{status} {d['bot']}: entry {len(ent)}, exit {len(ex)}{pnl_txt}{err}")
+        open_n = max(len(ent) - len(ex), 0)
+        skip = sum(1 for m in msgs if "SKIPPED" in m["text"].upper().splitlines()[0])
+        extra = (f", abhi khule {open_n}" if open_n else "") + (f", news se ruke {skip}" if skip else "")
+        lines.append(f"{status} {d['bot']}: entry {len(ent)}, exit {len(ex)}{extra}{pnl_txt}{err}")
     for m in missing:
         lines.append(f"❌ {m}: replay nahi chal paya")
     lines += ["", "Har bot ke alert alag message me aa rahe hain (jinke kuch bane)."]
