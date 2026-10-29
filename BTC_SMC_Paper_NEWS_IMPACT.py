@@ -938,12 +938,41 @@ def main():
 
         return
 
-    if len(new_indices) > 12:
+    # Bot permanently atakta tha jab 12 se zyada candle chhoot jati thi
+    # (GitHub late chale ya bot band raha ho). Ab:
+    #  - purani candles par sirf open position ka STOP/TARGET check hoga
+    #  - naya setup / entry sirf aakhri 12 candles (1 ghanta) par
+    MAX_FULL_CANDLES = 12
 
-        raise RuntimeError(
-            "Too many missed 5m candles. "
-            "Manual review required."
+    if len(new_indices) > MAX_FULL_CANDLES:
+
+        old_indices = new_indices[:-MAX_FULL_CANDLES]
+        new_indices = new_indices[-MAX_FULL_CANDLES:]
+
+        print(
+            f"INFO: {len(old_indices) + len(new_indices)} candles ka gap - "
+            f"{len(old_indices)} purani candles par sirf exits check, "
+            f"aakhri {len(new_indices)} par poora scan"
         )
+
+        for i in old_indices:
+
+            bar = df5.iloc[i]
+
+            if state["positions"]:
+                check_exits(
+                    state,
+                    bar
+                )
+
+            state["last_bar"] = int(
+                bar["time"]
+            )
+
+        # Purana adhura setup ab stale hai
+        state["setup"] = None
+
+        save_state(state)
 
     for i in new_indices:
 
