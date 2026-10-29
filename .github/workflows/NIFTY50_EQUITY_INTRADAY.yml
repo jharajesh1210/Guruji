@@ -1,4 +1,3 @@
-
 name: NIFTY50 EQUITY INTRADAY PAPER SCANNER
 
 on:
@@ -14,9 +13,11 @@ on:
           - scan
 
   schedule:
-    # Monday to Friday, every 5 minutes
-    # GitHub Actions cron uses UTC
-    - cron: "*/5 3-10 * * 1-5"
+    # GitHub cron uses UTC and often runs late or skips ticks.
+    # So we start only twice a day and the job itself loops every 5 minutes.
+    # 04:05 UTC = 09:35 IST (morning session), 07:05 UTC = 12:35 IST (afternoon session)
+    - cron: "5 4 * * 1-5"
+    - cron: "5 7 * * 1-5"
 
 permissions:
   contents: write
@@ -29,12 +30,14 @@ jobs:
   nifty50:
     name: Run NIFTY50 Equity Intraday Scanner
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 200
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
+          ref: main
+          fetch-depth: 0
           persist-credentials: true
 
       - name: Setup Python
@@ -52,44 +55,73 @@ jobs:
           test -f NIFTY50_EQUITY_INTRADAY.py
           python -m py_compile NIFTY50_EQUITY_INTRADAY.py
 
-      - name: Run NIFTY50 Scanner
+      - name: Scan once (manual scan mode)
+        if: github.event.inputs.mode == 'scan'
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          MODE: ${{ github.event.inputs.mode || 'paper' }}
-        run: |
-          set -o pipefail
+        run: python -u NIFTY50_EQUITY_INTRADAY.py --mode scan | tee NIFTY50_RUN_LOG.txt
 
-          if [ "$MODE" = "scan" ]; then
-            echo "NIFTY50 EQUITY SCAN MODE"
-            python -u NIFTY50_EQUITY_INTRADAY.py --mode scan | tee NIFTY50_RUN_LOG.txt
-          else
-            echo "NIFTY50 EQUITY PAPER MODE"
-            python -u NIFTY50_EQUITY_INTRADAY.py --mode paper | tee NIFTY50_RUN_LOG.txt
-          fi
-
-      - name: Save Paper Trading Files
-        if: success() && (github.event_name == 'schedule' || github.event.inputs.mode == 'paper')
+      - name: Paper loop every 5 minutes
+        if: github.event.inputs.mode != 'scan'
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          FILES="NIFTY50_EQUITY_PAPER_STATE.json NIFTY50_EQUITY_PAPER_TRADES.csv NIFTY50_EQUITY_PAPER_EVENTS.csv NIFTY50_EQUITY_SIGNALS.csv"
 
-          for file in \
-            NIFTY50_EQUITY_PAPER_STATE.json \
-            NIFTY50_EQUITY_PAPER_TRADES.csv \
-            NIFTY50_EQUITY_PAPER_EVENTS.csv \
-            NIFTY50_EQUITY_SIGNALS.csv
-          do
-            if [ -f "$file" ]; then
-              git add -f "$file"
-            fi
+          save_files () {
+            mkdir -p /tmp/nifty-save
+            for f in $FILES; do [ -f "$f" ] && cp "$f" /tmp/nifty-save/; done
+            for attempt in 1 2 3 4 5; do
+              git fetch -q origin main
+              git reset -q --hard origin/main
+              cp /tmp/nifty-save/* . 2>/dev/null || true
+              for f in $FILES; do [ -f "$f" ] && git add -f "$f"; done
+              if git diff --cached --quiet; then echo "No changes to save"; return 0; fi
+              git commit -q -m "Update NIFTY50 equity paper results [skip ci]"
+              if git push -q origin HEAD:main; then echo "Saved"; return 0; fi
+              echo "Push conflict, retry $attempt"; sleep 3
+            done
+            echo "WARNING: could not save this round"
+          }
+
+          # Morning job stops at 12:40 IST, afternoon job runs till 15:35 IST.
+          HOUR_UTC=$(date -u +%H)
+          if [ "$HOUR_UTC" -lt 7 ]; then STOP="12:40"; else STOP="15:35"; fi
+          echo "Looping until $STOP IST"
+
+          while true; do
+            NOW=$(TZ=Asia/Kolkata date +%H:%M)
+            if [[ "$NOW" > "$STOP" ]]; then echo "Session over at $NOW IST"; break; fi
+            echo "===== Run at $NOW IST ====="
+            python -u NIFTY50_EQUITY_INTRADAY.py --mode paper 2>&1 | tee -a NIFTY50_RUN_LOG.txt || true
+            save_files
+            # Sleep till 30 sec after the next 5-minute mark (gives Yahoo time to publish the candle)
+            SEC=$(( 300 - ($(date +%s) % 300) + 30 ))
+            sleep $SEC
           done
 
-          if ! git diff --cached --quiet; then
-            git commit -m "Update NIFTY50 equity paper results [skip ci]"
-            git push
-          else
-            echo "No new paper trading changes"
+          # End-of-day heartbeat on Telegram (only after the afternoon session)
+          if [ "$STOP" = "15:35" ] && [ -n "$BOT_TOKEN" ] && [ -n "$CHAT_ID" ]; then
+            SUMMARY=$(python - <<'PY'
+          import json, csv, datetime
+          from pathlib import Path
+          today = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
+          today = today.date().isoformat()
+          s = json.loads(Path('NIFTY50_EQUITY_PAPER_STATE.json').read_text())
+          sig = 0
+          p = Path('NIFTY50_EQUITY_SIGNALS.csv')
+          if p.exists():
+              sig = sum(1 for r in csv.DictReader(p.open()) if r['time'].startswith(today))
+          print(f"NIFTY50 PAPER - din ka summary {today}\nBot chala: haan\nAaj ke signal: {sig}\nKhule trade: {len(s.get('positions', {}))}\nAaj ka P&L: INR {s.get('day_pnl', {}).get('pnl', 0)}\nKul equity: INR {s.get('equity')}")
+          PY
+            )
+            curl -s -o /dev/null -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${CHAT_ID}" --data-urlencode "text=${SUMMARY}" || true
           fi
 
       - name: Upload Reports
