@@ -359,8 +359,10 @@ def tg(msg):
     if not tok or not chat:
         return
     try:
-        SESSION.post(f"https://api.telegram.org/bot{tok}/sendMessage",
-                     data={"chat_id": chat, "text": msg}, timeout=10)
+        response = SESSION.post(f"https://api.telegram.org/bot{tok}/sendMessage",
+                                data={"chat_id": chat, "text": msg}, timeout=10)
+        if not response.ok:
+            log.warning("Telegram rejected message: HTTP %s %s", response.status_code, response.text[:300])
     except requests.RequestException as e:
         log.warning("Telegram fail: %s", e)
 
@@ -415,6 +417,8 @@ def cmd_scan(args):
             msgs.append(m)
     if msgs:
         tg("📊 Crypto scan\n" + "\n".join(msgs))
+    else:
+        tg(f"✅ SCAN COMPLETED | Crypto Top100 | {args.tf} | NO SIGNAL | checked={len(results)} | min_score={args.min_score}")
 
 
 # ============================== PAPER TRADING ==============================
