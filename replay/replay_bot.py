@@ -315,10 +315,19 @@ def main():
     _CLOCK["real"] = 1
     with open(out, "w") as f:
         json.dump(result, f, indent=1, default=str)
-    sys.__stdout__.write(f"{bot}: steps={steps} errors={errors} telegram={len(TELEGRAM)} "
-                         f"real_calls={STATS['real_calls']}\n")
+    def ann(level, title, text):
+        text = text.replace("%", "%25").replace("\r", "").replace("\n", "%0A")[:3500]
+        sys.__stdout__.write(f"::{level} title={title}::{text}\n")
+
+    ann("notice", f"{bot} summary",
+        f"steps={steps} errors={errors} telegram={len(TELEGRAM)} real_calls={STATS['real_calls']} "
+        f"served={STATS['served']} blocked_posts={len(BLOCKED)}")
+    if TELEGRAM:
+        ann("notice", f"{bot} alerts",
+            "\n".join(f"[{m['time_ist']}] " + m["text"].replace("\n", " | ")[:160] for m in TELEGRAM[:20]))
+    ann("notice", f"{bot} log tail", log.getvalue()[-1500:])
     if last_err:
-        sys.__stdout__.write("LAST ERROR:\n" + last_err + "\n")
+        ann("warning", f"{bot} last error", last_err)
 
 
 if __name__ == "__main__":
