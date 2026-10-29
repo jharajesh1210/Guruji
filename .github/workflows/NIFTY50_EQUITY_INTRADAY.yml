@@ -14,10 +14,9 @@ on:
 
   schedule:
     # GitHub cron uses UTC and often runs late or skips ticks.
-    # So we start only twice a day and the job itself loops every 5 minutes.
-    # 04:05 UTC = 09:35 IST (morning session), 07:05 UTC = 12:35 IST (afternoon session)
-    - cron: "5 4 * * 1-5"
-    - cron: "5 7 * * 1-5"
+    # A backup run is triggered every 30 min (09:30 to 15:00 IST). Only ONE runs at a time;
+    # the next one waits in queue and takes over the moment the running one stops or breaks.
+    - cron: "*/30 4-9 * * 1-5"
 
 permissions:
   contents: write
@@ -30,7 +29,7 @@ jobs:
   nifty50:
     name: Run NIFTY50 Equity Intraday Scanner
     runs-on: ubuntu-latest
-    timeout-minutes: 200
+    timeout-minutes: 170
 
     steps:
       - name: Checkout Repository
@@ -69,44 +68,68 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
         shell: bash
         run: |
+          # Never let one failed command kill the loop
+          set +e
+          set +o pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           FILES="NIFTY50_EQUITY_PAPER_STATE.json NIFTY50_EQUITY_PAPER_TRADES.csv NIFTY50_EQUITY_PAPER_EVENTS.csv NIFTY50_EQUITY_SIGNALS.csv"
 
+          tg () {
+            if [ -n "$BOT_TOKEN" ] && [ -n "$CHAT_ID" ]; then
+              curl -s -m 15 -o /dev/null -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+                --data-urlencode "chat_id=${CHAT_ID}" --data-urlencode "text=$1"
+            fi
+          }
+
           save_files () {
             mkdir -p /tmp/nifty-save
-            for f in $FILES; do [ -f "$f" ] && cp "$f" /tmp/nifty-save/; done
+            for f in $FILES; do if [ -f "$f" ]; then cp "$f" /tmp/nifty-save/; fi; done
             for attempt in 1 2 3 4 5; do
-              git fetch -q origin main
-              git reset -q --hard origin/main
-              cp /tmp/nifty-save/* . 2>/dev/null || true
-              for f in $FILES; do [ -f "$f" ] && git add -f "$f"; done
+              git fetch -q origin main && git reset -q --hard origin/main
+              cp /tmp/nifty-save/* . 2>/dev/null
+              for f in $FILES; do if [ -f "$f" ]; then git add -f "$f"; fi; done
               if git diff --cached --quiet; then echo "No changes to save"; return 0; fi
               git commit -q -m "Update NIFTY50 equity paper results [skip ci]"
               if git push -q origin HEAD:main; then echo "Saved"; return 0; fi
-              echo "Push conflict, retry $attempt"; sleep 3
+              echo "Push failed, retry $attempt"; sleep $((attempt * 3))
             done
-            echo "WARNING: could not save this round"
+            echo "WARNING: could not save this round (will try again next round)"
           }
 
-          # Morning job stops at 12:40 IST, afternoon job runs till 15:35 IST.
-          HOUR_UTC=$(date -u +%H)
-          if [ "$HOUR_UTC" -lt 7 ]; then STOP="12:40"; else STOP="15:35"; fi
-          echo "Looping until $STOP IST"
+          # Each run works max ~150 min (GitHub limit safety), never past 15:35 IST.
+          # When it ends, the queued backup run continues from the saved state.
+          END_EPOCH=$(( $(date +%s) + 150*60 ))
+          FAILS=0; ROUNDS=0; DAY_OVER=0
+          echo "Run started at $(TZ=Asia/Kolkata date +%H:%M) IST"
 
           while true; do
             NOW=$(TZ=Asia/Kolkata date +%H:%M)
-            if [[ "$NOW" > "$STOP" ]]; then echo "Session over at $NOW IST"; break; fi
-            echo "===== Run at $NOW IST ====="
-            python -u NIFTY50_EQUITY_INTRADAY.py --mode paper 2>&1 | tee -a NIFTY50_RUN_LOG.txt || true
+            if [[ "$NOW" > "15:35" ]]; then echo "Market session over at $NOW IST"; DAY_OVER=1; break; fi
+            if [ "$(date +%s)" -ge "$END_EPOCH" ]; then echo "Handing over to next queued run"; break; fi
+            echo "===== Round at $NOW IST ====="
+            python -u NIFTY50_EQUITY_INTRADAY.py --mode paper > /tmp/round.log 2>&1
+            CODE=$?
+            cat /tmp/round.log | tee -a NIFTY50_RUN_LOG.txt
+            ROUNDS=$((ROUNDS + 1))
+            if [ "$CODE" -ne 0 ]; then
+              FAILS=$((FAILS + 1))
+              echo "Python error (exit $CODE), consecutive fails: $FAILS"
+              if [ "$FAILS" -eq 3 ]; then
+                tg "⚠️ NIFTY50 PAPER bot me lagatar 3 baar error aaya ($NOW IST). Bot rukega nahi, dobara koshish karta rahega. Last error: $(tail -n 3 /tmp/round.log)"
+              fi
+            else
+              if [ "$FAILS" -ge 3 ]; then tg "✅ NIFTY50 PAPER bot wapas theek chal raha hai ($NOW IST)"; fi
+              FAILS=0
+            fi
             save_files
             # Sleep till 30 sec after the next 5-minute mark (gives Yahoo time to publish the candle)
             SEC=$(( 300 - ($(date +%s) % 300) + 30 ))
             sleep $SEC
           done
 
-          # End-of-day heartbeat on Telegram (only after the afternoon session)
-          if [ "$STOP" = "15:35" ] && [ -n "$BOT_TOKEN" ] && [ -n "$CHAT_ID" ]; then
+          # End-of-day heartbeat on Telegram (only from the run that finished the day)
+          if [ "$DAY_OVER" = "1" ] && [ "$ROUNDS" -gt 0 ] && [ -n "$BOT_TOKEN" ] && [ -n "$CHAT_ID" ]; then
             SUMMARY=$(python - <<'PY'
           import json, csv, datetime
           from pathlib import Path
