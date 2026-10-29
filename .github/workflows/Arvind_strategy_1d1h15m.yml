@@ -18,7 +18,7 @@ concurrency:
 jobs:
   crypto-backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
 
@@ -43,160 +43,392 @@ jobs:
           elif [ -f "Arvind_strategy_1d1h15m(2).py" ]; then
             echo "PYFILE=Arvind_strategy_1d1h15m(2).py" >> "$GITHUB_ENV"
           else
-            echo "ERROR: Python strategy file not found"
+            echo "ERROR: Arvind strategy Python file not found"
             exit 1
           fi
 
-      - name: Download BTC and PAXG Market Data
+      - name: Download CoinDCX Futures Market Data
         shell: bash
         run: |
           python - <<'PYCODE'
+          import sys
+          import time
           import requests
           import pandas as pd
-          import time
           from datetime import datetime, timezone, timedelta
 
-          BASE = "https://api.binance.com/api/v3/klines"
+          API = "https://api.coindcx.com"
+          PUBLIC = "https://public.coindcx.com"
 
-          SYMBOLS = {
-              "BTCUSDT": "BTCUSDT_15m.csv",
-              "PAXGUSDT": "PAXGUSDT_15m.csv"
+          LOOKBACK_DAYS = 120
+          CHUNK_DAYS = 2
+
+          MARKETS = {
+              "BTC": "BTCUSDT_15m.csv",
+              "PAXG": "PAXGUSDT_15m.csv"
           }
 
-          INTERVAL_MS = 15 * 60 * 1000
-          LOOKBACK_DAYS = 400
-
           session = requests.Session()
+          session.headers.update({
+              "User-Agent": "CoinDCX-Futures-Backtest/1.0",
+              "Accept": "application/json"
+          })
 
-          end = datetime.now(timezone.utc)
-          start = end - timedelta(days=LOOKBACK_DAYS)
+          def get_json(url, params=None):
+              last_error = None
 
-          for symbol, filename in SYMBOLS.items():
+              for attempt in range(5):
+                  try:
+                      response = session.get(
+                          url,
+                          params=params,
+                          timeout=40
+                      )
+                      response.raise_for_status()
+                      return response.json()
 
-              print(f"Downloading {symbol}", flush=True)
-
-              start_ms = int(start.timestamp() * 1000)
-              end_ms = int(end.timestamp() * 1000)
-
-              rows = []
-
-              while start_ms < end_ms:
-
-                  params = {
-                      "symbol": symbol,
-                      "interval": "15m",
-                      "startTime": start_ms,
-                      "endTime": end_ms,
-                      "limit": 1000
-                  }
-
-                  data = None
-
-                  for attempt in range(5):
-                      try:
-                          response = session.get(
-                              BASE,
-                              params=params,
-                              timeout=30
-                          )
-                          response.raise_for_status()
-
-                          data = response.json()
-
-                          if not isinstance(data, list):
-                              raise RuntimeError(
-                                  f"Invalid response: {data}"
-                              )
-
-                          break
-
-                      except Exception as exc:
-                          print(
-                              f"{symbol} attempt {attempt + 1}: {exc}",
-                              flush=True
-                          )
-                          if attempt == 4:
-                              raise
+                  except Exception as exc:
+                      last_error = exc
+                      print(
+                          f"API retry {attempt + 1}/5: {exc}",
+                          flush=True
+                      )
+                      if attempt < 4:
                           time.sleep(2 * (attempt + 1))
 
-                  if not data:
-                      break
-
-                  rows.extend(data)
-
-                  next_ms = int(data[-1][0]) + INTERVAL_MS
-
-                  if next_ms <= start_ms:
-                      raise RuntimeError(
-                          "Pagination did not advance"
-                      )
-
-                  start_ms = next_ms
-
-                  time.sleep(0.2)
-
-              if not rows:
-                  raise RuntimeError(
-                      f"No data downloaded for {symbol}"
-                  )
-
-              df = pd.DataFrame(rows)
-
-              df = df.iloc[:, :5].copy()
-
-              df.columns = [
-                  "time",
-                  "open",
-                  "high",
-                  "low",
-                  "close"
-              ]
-
-              df["time"] = pd.to_numeric(
-                  df["time"],
-                  errors="coerce"
+              raise RuntimeError(
+                  f"CoinDCX API request failed: {last_error}"
               )
 
-              for col in [
-                  "open", "high", "low", "close"
-              ]:
+          def active_instruments():
+              url = (
+                  API +
+                  "/exchange/v1/derivatives/futures/data/"
+                  "active_instruments"
+              )
+
+              data = get_json(
+                  url,
+                  params={
+                      "margin_currency_short_name[]": "USDT"
+                  }
+              )
+
+              if isinstance(data, list):
+                  items = data
+
+              elif isinstance(data, dict):
+                  items = None
+                  for key in (
+                      "data",
+                      "instruments",
+                      "active_instruments"
+                  ):
+                      if isinstance(data.get(key), list):
+                          items = data[key]
+                          break
+
+                  if items is None:
+                      raise RuntimeError(
+                          "Unexpected active instruments response: "
+                          + str(data)[:500]
+                      )
+              else:
+                  raise RuntimeError(
+                      "Invalid active instruments response"
+                  )
+
+              pairs = set()
+
+              for item in items:
+                  if isinstance(item, str):
+                      pairs.add(item.upper())
+
+                  elif isinstance(item, dict):
+                      pair = (
+                          item.get("pair")
+                          or item.get("instrument")
+                          or item.get("symbol")
+                      )
+                      if pair:
+                          pairs.add(str(pair).upper())
+
+              if not pairs:
+                  raise RuntimeError(
+                      "CoinDCX returned no USDT Futures instruments"
+                  )
+
+              print(
+                  f"Active USDT Futures instruments: {len(pairs)}",
+                  flush=True
+              )
+
+              return pairs
+
+          def find_pair(symbol, pairs):
+              candidates = [
+                  f"B-{symbol}_USDT",
+                  f"{symbol}_USDT",
+                  f"{symbol}USDT"
+              ]
+
+              for candidate in candidates:
+                  if candidate in pairs:
+                      return candidate
+
+              matches = [
+                  pair for pair in pairs
+                  if pair.endswith(f"-{symbol}_USDT")
+              ]
+
+              if len(matches) == 1:
+                  return matches[0]
+
+              if len(matches) > 1:
+                  raise RuntimeError(
+                      f"Multiple Futures instruments for {symbol}: "
+                      + ", ".join(sorted(matches))
+                  )
+
+              raise RuntimeError(
+                  f"CoinDCX USDT FUTURES MARKET NOT AVAILABLE: "
+                  f"{symbol}. No Spot/Binance fallback allowed."
+              )
+
+          def download_5m(pair):
+              url = PUBLIC + "/market_data/candlesticks"
+
+              end = datetime.now(timezone.utc)
+              start = end - timedelta(days=LOOKBACK_DAYS)
+
+              cursor = int(start.timestamp())
+              end_sec = int(end.timestamp())
+              chunk_sec = CHUNK_DAYS * 86400
+
+              all_rows = []
+              chunk_number = 0
+
+              while cursor < end_sec:
+                  chunk_end = min(
+                      cursor + chunk_sec,
+                      end_sec
+                  )
+
+                  data = get_json(
+                      url,
+                      params={
+                          "pair": pair,
+                          "from": cursor,
+                          "to": chunk_end,
+                          "resolution": "5",
+                          "pcode": "f"
+                      }
+                  )
+
+                  if not isinstance(data, dict):
+                      raise RuntimeError(
+                          f"Unexpected candles response for {pair}"
+                      )
+
+                  if data.get("s") != "ok":
+                      raise RuntimeError(
+                          f"CoinDCX candles API error for {pair}: "
+                          + str(data)[:500]
+                      )
+
+                  rows = data.get("data")
+
+                  if not isinstance(rows, list):
+                      raise RuntimeError(
+                          f"Invalid candle data for {pair}"
+                      )
+
+                  all_rows.extend(rows)
+                  chunk_number += 1
+
+                  if chunk_number % 10 == 0:
+                      print(
+                          f"{pair}: {chunk_number} chunks, "
+                          f"{len(all_rows)} candles",
+                          flush=True
+                      )
+
+                  cursor = chunk_end
+                  time.sleep(0.15)
+
+              if not all_rows:
+                  raise RuntimeError(
+                      f"NO FUTURES CANDLE DATA: {pair}. "
+                      "CoinDCX returned no historical candles."
+                  )
+
+              df = pd.DataFrame(all_rows)
+
+              required = [
+                  "time", "open", "high", "low", "close"
+              ]
+
+              missing = [
+                  col for col in required
+                  if col not in df.columns
+              ]
+
+              if missing:
+                  raise RuntimeError(
+                      f"{pair} missing candle columns: {missing}"
+                  )
+
+              for col in required:
                   df[col] = pd.to_numeric(
                       df[col],
                       errors="coerce"
                   )
 
-              df = df.dropna()
-
+              df = df.dropna(subset=required)
               df["time"] = df["time"].astype("int64")
 
               df = df.drop_duplicates(
                   subset=["time"]
               ).sort_values("time")
 
-              now_ms = int(
-                  datetime.now(timezone.utc).timestamp()
-                  * 1000
-              )
+              # Only completed 5-minute candles
+              now_ms = int(time.time() * 1000)
 
-              # Exclude unfinished candles
               df = df[
-                  df["time"] + INTERVAL_MS <= now_ms
-              ]
+                  df["time"] + 300000 <= now_ms
+              ].copy()
 
-              if len(df) < 2000:
+              if df.empty:
                   raise RuntimeError(
-                      f"Insufficient data for {symbol}: "
-                      f"{len(df)} candles"
+                      f"No completed 5m candles for {pair}"
                   )
 
-              df.to_csv(filename, index=False)
+              return df
+
+          def convert_to_15m(df, pair):
+              df = df.copy()
+
+              df["dt"] = pd.to_datetime(
+                  df["time"],
+                  unit="ms",
+                  utc=True
+              )
+
+              df = df.set_index("dt").sort_index()
+
+              aggregation = {
+                  "open": "first",
+                  "high": "max",
+                  "low": "min",
+                  "close": "last",
+                  "time": "count"
+              }
+
+              if "volume" in df.columns:
+                  df["volume"] = pd.to_numeric(
+                      df["volume"],
+                      errors="coerce"
+                  )
+                  aggregation["volume"] = "sum"
+
+              result = df.resample(
+                  "15min",
+                  label="left",
+                  closed="left"
+              ).agg(aggregation)
+
+              # A valid 15m candle needs exactly 3
+              # underlying 5m candles.
+              result = result[
+                  result["time"] == 3
+              ].copy()
+
+              result = result.drop(columns=["time"])
+              result = result.dropna(
+                  subset=["open", "high", "low", "close"]
+              )
+
+              result["time"] = (
+                  result.index.astype("int64") // 1000000
+              )
+
+              now_ms = int(time.time() * 1000)
+
+              result = result[
+                  result["time"] + 900000 <= now_ms
+              ]
+
+              result = result.reset_index(drop=True)
+
+              columns = [
+                  "time", "open", "high", "low", "close"
+              ]
+
+              if "volume" in result.columns:
+                  columns.append("volume")
+
+              result = result[columns]
+
+              if len(result) < 2000:
+                  raise RuntimeError(
+                      f"INSUFFICIENT FUTURES HISTORY: {pair}, "
+                      f"only {len(result)} valid 15m candles"
+                  )
+
+              return result
+
+          try:
+              pairs = active_instruments()
+
+              # Check BOTH before downloading.
+              selected = {}
+
+              for symbol in MARKETS:
+                  selected[symbol] = find_pair(
+                      symbol,
+                      pairs
+                  )
+                  print(
+                      f"{symbol} Futures: "
+                      f"{selected[symbol]}",
+                      flush=True
+                  )
+
+              for symbol, filename in MARKETS.items():
+                  pair = selected[symbol]
+
+                  print(
+                      f"Downloading CoinDCX Futures {pair}",
+                      flush=True
+                  )
+
+                  df5 = download_5m(pair)
+                  df15 = convert_to_15m(df5, pair)
+
+                  df15.to_csv(
+                      filename,
+                      index=False
+                  )
+
+                  print(
+                      f"SUCCESS: {filename} "
+                      f"({len(df15)} candles)",
+                      flush=True
+                  )
 
               print(
-                  f"SUCCESS: {filename} "
-                  f"with {len(df)} candles",
+                  "SUCCESS: BTC and PAXG CoinDCX "
+                  "Futures CSV files ready",
                   flush=True
               )
 
+          except Exception as exc:
+              print(
+                  f"ERROR: {exc}",
+                  file=sys.stderr,
+                  flush=True
+              )
+              sys.exit(1)
           PYCODE
 
       - name: Verify Market Data
@@ -212,7 +444,7 @@ jobs:
             exit 1
           }
 
-          echo "Both CSV files are ready"
+          echo "Both CoinDCX Futures CSV files ready"
 
       - name: Run BTC Backtest
         shell: bash
@@ -232,7 +464,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: crypto-backtest-results
+          name: CoinDCX-Futures-Backtest-Results
           path: |
             BTCUSDT_15m.csv
             PAXGUSDT_15m.csv
