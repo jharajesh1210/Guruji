@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: guruji-paper-scanners
+  group: top100-original
   cancel-in-progress: false
 
 jobs:
