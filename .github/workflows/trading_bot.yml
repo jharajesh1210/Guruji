@@ -1,0 +1,32 @@
+name: CoinDCX Futures Trading Bot
+
+on:
+  schedule:
+    # Har 15 minute mein script run karne ke liye cron expression
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # Manual run karne ke liye option
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests pyyaml pandas pandas-ta
+
+    - name: Run Trading Script
+      env:
+        COINDCX_API_KEY: ${{ secrets.COINDCX_API_KEY }}
+        COINDCX_SECRET_KEY: ${{ secrets.COINDCX_SECRET_KEY }}
+      run: |
+        python coindcx_futures_strategy.py
