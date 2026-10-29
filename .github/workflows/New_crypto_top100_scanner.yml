@@ -1,0 +1,61 @@
+name: Crypto Top100 Scanner
+
+# Is file ko repo me yahan rakho: .github/workflows/New_crypto_top100_scanner.yml
+# Repo me New_crypto_top100_scanner.py bhi root me honi chahiye.
+# Telegram alerts ke liye: Settings > Secrets and variables > Actions me
+#   TG_TOKEN aur TG_CHAT_ID add karo.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # har 15 minute (GitHub kabhi kabhi thoda late chalata hai)
+  workflow_dispatch:           # manual run ka button
+    inputs:
+      tf:
+        description: "Timeframe"
+        required: false
+        default: "15m"
+        type: choice
+        options: ["5m", "15m", "30m", "1h", "4h", "1d"]
+      min_score:
+        description: "Minimum strategy score (1-10)"
+        required: false
+        default: "4"
+      top:
+        description: "Kitne top coins scan karne hain"
+        required: false
+        default: "100"
+
+concurrency:
+  group: crypto-scanner
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      TG_TOKEN: ${{ secrets.TG_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      TF: ${{ github.event.inputs.tf || '15m' }}
+      MIN_SCORE: ${{ github.event.inputs.min_score || '4' }}
+      TOP: ${{ github.event.inputs.top || '100' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Dependencies install
+        run: pip install requests pandas numpy
+
+      - name: Selftest (indicators check)
+        run: python New_crypto_top100_scanner.py selftest
+
+      - name: Scan top coins
+        run: python New_crypto_top100_scanner.py scan --tf "$TF" --min-score "$MIN_SCORE" --top "$TOP"
