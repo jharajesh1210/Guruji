@@ -95,9 +95,11 @@ def send_telegram(message):
             timeout=20
         )
         response.raise_for_status()
-        print("Telegram message sent")
-    except requests.RequestException as error:
-        print("Telegram error:", str(error))
+        if not response.json().get("ok"):
+            raise RuntimeError("Telegram API returned ok=false")
+        print("TELEGRAM DELIVERY: API ACCEPTED", flush=True)
+    except (requests.RequestException, ValueError, RuntimeError) as error:
+        print("TELEGRAM DELIVERY: FAILED:", str(error), flush=True)
 
 
 # =========================
