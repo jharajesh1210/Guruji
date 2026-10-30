@@ -124,7 +124,7 @@ def telegram(message):
     chat = os.environ.get('CHAT_ID')
 
     if not token or not chat:
-        LOG.warning('Telegram secrets absent: %s', message)
+        LOG.warning('TELEGRAM DELIVERY: NOT CONFIGURED')
         return
 
     try:
@@ -134,8 +134,11 @@ def telegram(message):
             timeout=20
         )
         response.raise_for_status()
-    except requests.RequestException as exc:
-        LOG.warning('Telegram send failed: %s', exc)
+        if not response.json().get('ok'):
+            raise ValueError('Telegram API returned ok=false')
+        LOG.info('TELEGRAM DELIVERY: API ACCEPTED')
+    except (requests.RequestException, ValueError) as exc:
+        LOG.error('TELEGRAM DELIVERY: FAILED: %s', exc)
 
 
 def initial_state():
