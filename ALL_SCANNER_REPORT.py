@@ -44,8 +44,6 @@ TRADE_FILE_MAP = {
     "RIL_TRADING_SYSTEM": ["RELIANCE_PAPER_TRADES.csv"],
     "RIL_CANDLESTICK_BIBLE": ["RIL_CANDLESTICK_BIBLE_trades.csv"],
     "Arvind_vwap_pullback_short": ["arvind_vwap_rr4_trades.csv"],
-    "New_crypto_top100_scanner": ["paper_trades.csv"],
-    "Arvind_strategy_1d1h15m": ["BTC_strategy_trades.csv", "PAXG_strategy_trades.csv"],
     "GOLD_COMBO_STRATEGY": ["XAUUSDT_1YEAR_TRADES.csv", "PAXGUSDT_1YEAR_TRADES.csv"],
 }
 
@@ -118,12 +116,22 @@ def restore_artifact_trades(wf):
         print("Artifact lookup failed for", stem, str(exc)[:200])
     return restored
 
+SIGNAL_ONLY = {"New_crypto_top100_scanner", "trading_bot"}
+BACKTEST_ONLY = {"Arvind_strategy_1d1h15m"}
+
 def performance(workflow):
     files = trades_for(workflow)
     if not files:
         stem = Path(workflow.get("path", "")).stem
         expected = TRADE_FILE_MAP.get(stem, [])
-        reason = ("Expected trade CSV not in repository checkout: " + ", ".join(expected) + ". Check workflow artifact or scanner trade export" if expected else "No mapped trade CSV; this may be a signal-only scanner or diagnostic workflow")
+        if stem in SIGNAL_ONLY:
+            reason = "SIGNAL ONLY: no closed paper-trade export in this workflow"
+        elif stem in BACKTEST_ONLY:
+            reason = "BACKTEST: historical results, not live paper trades"
+        elif expected:
+            reason = "NO CLOSED TRADE CSV FOUND: " + ", ".join(expected) + "; check state/log for zero trades"
+        else:
+            reason = "NO TRADE MAPPING: diagnostic, status report or signal-only workflow"
         return dict(total_trades="-", wins="-", losses="-",
                     breakeven="-", win_percent="-", net_pnl_usdt="-",
                     sum_trade_return_pct="-", net_pnl_inr="-", trade_files="", data_note=reason)
@@ -178,7 +186,7 @@ def performance(workflow):
     return dict(total_trades=decisive + breakeven, wins=wins, losses=losses,
                 breakeven=breakeven,
                 win_percent=round(100 * wins / decisive, 2) if decisive else "-",
-                net_pnl_usdt=round(pnl, 4) if pnl_count and not inr_count else "-",
+                net_pnl_usdt=round(pnl, 4) if pnl_count else "-",
                 sum_trade_return_pct=round(return_pct, 4) if return_count else "-",
                 trade_files="; ".join(str(f) for f in files),
                 net_pnl_inr=round(inr, 2) if inr_count else "-",
