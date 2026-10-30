@@ -19,3 +19,4 @@ time,pair,direction,reason,range_pct,sweep_depth_pct
 2026-10-28T18:45:00+00:00,B-WLFI_USDT,LONG,risk_too_small_0.29,0.9,0.038
 2026-10-30T07:30:00+00:00,B-ASTER_USDT,SHORT,range_too_wide,1.953,0.043
 2026-10-30T11:00:00+00:00,B-SOL_USDT,LONG,range_too_wide,1.889,0.062
+2026-10-30T21:15:00+00:00,B-HBAR_USDT,SHORT,entry_ran_away_0.45pct,,
