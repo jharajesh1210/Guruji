@@ -460,6 +460,12 @@ jobs:
           python "$PYFILE" PAXG PAXGUSDT_15m.csv \
             | tee PAXG_strategy_report.txt
 
+      - name: Notify Telegram of historical backtest completion
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python ARVIND_COINDCX_TELEGRAM_NOTIFY.py backtest BTC_strategy_report.txt
+
       - name: Upload Backtest Reports
         if: always()
         uses: actions/upload-artifact@v4
