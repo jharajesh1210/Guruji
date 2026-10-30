@@ -2,7 +2,7 @@ name: ACTIVE SCANNERS HEALTH CHECK
 on:
   workflow_dispatch:
   schedule:
-    - cron: "40 2 * * *" # 08:10 IST daily; GitHub schedules may be delayed
+    - cron: "10,40 * * * *" # Every 30 minutes; GitHub schedules may be delayed
 permissions:
   actions: read
   contents: read
