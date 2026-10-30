@@ -18,8 +18,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python ALL_SCANNER_REPORT.py
+      - name: Verify report exists
+        run: |
+          test -s ALL_SCANNER_REPORT.csv
+          ls -lh ALL_SCANNER_REPORT.csv
       - uses: actions/upload-artifact@v4
         with:
           name: ALL_SCANNER_REPORT
           path: ALL_SCANNER_REPORT.csv
           retention-days: 30
+          if-no-files-found: error
