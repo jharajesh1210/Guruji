@@ -1,0 +1,21 @@
+name: ACTIVE SCANNERS HEALTH CHECK
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "40 2 * * *" # 08:10 IST daily; GitHub schedules may be delayed
+permissions:
+  actions: read
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check active workflows and notify only on problems
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python ACTIVE_SCANNERS_HEALTH_CHECK.py
