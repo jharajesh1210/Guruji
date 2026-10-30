@@ -3,6 +3,8 @@ name: GOLD COMBO STRATEGY PAPER
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 1 * * *"  # Daily 06:30 IST
 
 permissions:
   contents: read
