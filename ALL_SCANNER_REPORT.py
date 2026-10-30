@@ -1,5 +1,7 @@
 """Guruji unified workflow and paper-trade report. Does not run trading strategies."""
 import csv
+import io
+import zipfile
 import json
 import os
 import re
@@ -56,6 +58,52 @@ def trades_for(workflow):
         if base in (key, key + "paper") or key == base + "paper":
             matches.append(file)
     return matches
+
+
+def restore_artifact_trades(wf):
+    """Use newest available artifact snapshot; never combine repeated run snapshots."""
+    stem = Path(wf.get("path", "")).stem
+    wanted = TRADE_FILE_MAP.get(stem, [])
+    missing = {n.lower(): n for n in wanted if not Path(n).is_file()}
+    if not missing or not TOKEN:
+        return []
+    restored = []
+    try:
+        runs = api(f"/actions/workflows/{wf['id']}/runs?per_page=8").get("workflow_runs", [])
+        for run in runs:
+            if not missing:
+                break
+            if run.get("conclusion") != "success":
+                continue
+            artifacts = api(f"/actions/runs/{run['id']}/artifacts?per_page=100").get("artifacts", [])
+            for artifact in artifacts:
+                if not missing:
+                    break
+                if artifact.get("expired"):
+                    continue
+                url = artifact.get("archive_download_url")
+                if not url:
+                    continue
+                try:
+                    with urlopen(Request(url, headers=HEADERS), timeout=45) as response:
+                        payload = response.read(30 * 1024 * 1024 + 1)
+                    if len(payload) > 30 * 1024 * 1024:
+                        print("Skipping oversized artifact", artifact.get("name"))
+                        continue
+                    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                        for member in archive.infolist():
+                            name = Path(member.filename).name.lower()
+                            if name not in missing or member.is_dir() or member.file_size > 10 * 1024 * 1024:
+                                continue
+                            destination = Path(missing.pop(name))
+                            destination.write_bytes(archive.read(member))
+                            restored.append(str(destination))
+                            print("Restored trade CSV", destination, "from run", run["id"])
+                except Exception as exc:
+                    print("Artifact unavailable", artifact.get("name"), str(exc)[:160])
+    except Exception as exc:
+        print("Artifact lookup failed for", stem, str(exc)[:200])
+    return restored
 
 def performance(workflow):
     files = trades_for(workflow)
@@ -143,6 +191,7 @@ def main():
         ist = (datetime.fromisoformat(started.replace("Z", "+00:00"))
                .astimezone(timezone(timedelta(hours=5, minutes=30)))
                .strftime("%Y-%m-%d %H:%M:%S") if started else "")
+        restore_artifact_trades(wf)
         rows.append(dict(scanner=wf.get("name", ""), workflow=wf.get("path", ""),
                          enabled=wf.get("state", ""), last_run_ist=ist,
                          run_status=run.get("status", "never_run"),
