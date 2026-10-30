@@ -65,5 +65,16 @@ def main():
         print("Telegram health alert sent")
     else:
         print("No workflow failure/staleness detected; no Telegram alert needed")
+    # Once daily, send an explicit status confirmation, even if no trade signals.
+    now=datetime.now(timezone.utc)
+    if now.hour==2 and 40<=now.minute<55:
+        msg=(f"GURUJI DAILY SCANNER CONFIRMATION\n"
+             f"UTC: {now:%Y-%m-%d %H:%M}\n"
+             f"Healthy/recent workflows: {healthy}\\n"
+             f"Issues: {len(issues)}\\n"
+             f"Disabled/excluded: {skipped}\\n"
+             "GitHub workflow health only; Telegram trade alerts and paper entries are not independently verified.")
+        send(msg)
+        print("DAILY STATUS CONFIRMATION: TELEGRAM API ACCEPTED")
 if __name__=="__main__":
     main()
