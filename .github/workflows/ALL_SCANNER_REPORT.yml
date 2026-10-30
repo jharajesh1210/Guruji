@@ -1,0 +1,25 @@
+name: ALL SCANNER REPORT
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+permissions:
+  contents: read
+  actions: read
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Create report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python ALL_SCANNER_REPORT.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALL_SCANNER_REPORT
+          path: ALL_SCANNER_REPORT.csv
+          retention-days: 30
