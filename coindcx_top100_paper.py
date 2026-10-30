@@ -22,9 +22,14 @@ def alert(msg):
  token=os.getenv("BOT_TOKEN") or os.getenv("TG_TOKEN")
  chat=os.getenv("CHAT_ID") or os.getenv("TG_CHAT_ID")
  print(msg,flush=True)
- if token and chat:
-  r=s.post("https://api.telegram.org/bot"+token+"/sendMessage",data={"chat_id":chat,"text":msg},timeout=15)
-  r.raise_for_status()
+ if not token or not chat:
+  print("TELEGRAM DELIVERY: NOT CONFIGURED",flush=True)
+  return
+ r=s.post("https://api.telegram.org/bot"+token+"/sendMessage",data={"chat_id":chat,"text":msg},timeout=15)
+ r.raise_for_status()
+ if not r.json().get("ok"):
+  raise RuntimeError("TELEGRAM DELIVERY: API REJECTED")
+ print("TELEGRAM DELIVERY: API ACCEPTED",flush=True)
 def candles(pair,resolution,days=8):
  end=int(time.time())
  start=end-days*86400
