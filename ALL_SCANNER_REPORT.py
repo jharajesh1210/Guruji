@@ -28,21 +28,28 @@ def numeric(value):
 def normalize(value):
     return re.sub(r"[^a-z0-9]", "", str(value).lower())
 
+TRADE_FILE_MAP = {
+    "TOP100_ORIGINAL": ["TOP100_CRIPTO_AMC_POC_trades.csv"],
+    "TOP100_NEWS_IMPACT": ["TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_trades.csv"],
+    "ASIAN_LONDON_NY_ORIGINAL": ["ASIAN_LONDON_NY_PAPER_trades.csv"],
+    "ASIAN_LONDON_NY_NEWS_IMPACT": ["ASIAN_LONDON_NY_PAPER_NEWS_IMPACT_trades.csv"],
+    "BTC_SMC_ORIGINAL": ["BTC_SMC_Paper_trades.csv"],
+    "BTC_SMC_NEWS_IMPACT": ["BTC_SMC_Paper_NEWS_IMPACT_trades.csv"],
+    "TOP100_CRIPTO_AMC_POC_V4": ["TOP100_CRIPTO_AMC_POC_V4_trades.csv"],
+    "GOLD_COMBO_PAPER": ["GOLD_COMBO_PAPER_trades.csv"],
+}
+
 def trades_for(workflow):
     stem = Path(workflow.get("path", "")).stem
+    if stem in TRADE_FILE_MAP:
+        return [Path(n) for n in TRADE_FILE_MAP[stem] if Path(n).is_file()]
     key = normalize(stem)
-    candidates = []
+    matches = []
     for file in Path(".").glob("*trades.csv"):
         base = normalize(file.name[:-len("_trades.csv")])
-        if base == key:
-            candidates.append(file)
-    # Some workflows are named without the _PAPER suffix while their data uses it.
-    if not candidates:
-        for file in Path(".").glob("*trades.csv"):
-            base = normalize(file.name[:-len("_trades.csv")])
-            if base == key + "paper" or key == base + "paper":
-                candidates.append(file)
-    return candidates
+        if base in (key, key + "paper") or key == base + "paper":
+            matches.append(file)
+    return matches
 
 def performance(workflow):
     files = trades_for(workflow)
@@ -61,16 +68,16 @@ def performance(workflow):
                 row = {normalize(k): v for k, v in raw.items() if k}
                 if not row:
                     continue
-                if "exittime" in row and not row["exittime"].strip():
+                if any(k in row and not str(row[k]).strip() for k in ("exittime", "exittimeutc")):
                     continue
                 status = str(row.get("result") or row.get("status") or row.get("outcome") or "").upper().strip()
                 if status in ("OPEN", "ACTIVE", "PENDING", "RUNNING", "ENTRY"):
                     continue
                 usdt = next((numeric(row[k]) for k in
-                             ("netpnlusdt", "pnlusdt", "realizedpnl", "netpnl", "profitusdt", "pnl")
+                             ("netpnlusdt", "paperpnlusdt", "pnlusdt", "realizedpnl", "netpnl", "profitusdt", "pnl")
                              if k in row and numeric(row[k]) is not None), None)
                 pct = next((numeric(row[k]) for k in
-                            ("netreturnpctperleg", "netreturnpct", "returnpct", "profitpct")
+                            ("netreturnpctperleg", "netreturnpct", "netpct", "returnpct", "profitpct", "returnpctofequity")
                             if k in row and numeric(row[k]) is not None), None)
                 if usdt is not None:
                     pnl += usdt
