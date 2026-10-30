@@ -27,8 +27,11 @@ def notify(message):
         response = requests.post(f'https://api.telegram.org/bot{token}/sendMessage',
                                  json={'chat_id': chat, 'text': message}, timeout=15)
         response.raise_for_status()
-    except requests.RequestException as exc:
-        print('Telegram error:', exc, flush=True)
+        if not response.json().get('ok'):
+            raise ValueError('Telegram API returned ok=false')
+        print('TELEGRAM DELIVERY: API ACCEPTED', flush=True)
+    except (requests.RequestException, ValueError) as exc:
+        print('TELEGRAM DELIVERY: FAILED:', exc, flush=True)
 
 
 def append(path, row):
