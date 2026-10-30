@@ -1,0 +1,46 @@
+name: TELEGRAM DELIVERY DIAGNOSTIC
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify both Telegram configurations and send test
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import os, json, urllib.request, urllib.error
+          pairs = [("BOT_TOKEN/CHAT_ID", os.getenv("BOT_TOKEN"), os.getenv("CHAT_ID")),
+                   ("TG_TOKEN/TG_CHAT_ID", os.getenv("TG_TOKEN"), os.getenv("TG_CHAT_ID"))]
+          failures = []
+          for label, token, chat in pairs:
+              if not token or not chat:
+                  print(f"{label}: NOT CONFIGURED")
+                  failures.append(label + " missing")
+                  continue
+              body = json.dumps({"chat_id":chat, "text":f"GURUJI TELEGRAM DIAGNOSTIC SUCCESS: {label}\nThis is a test, not a trading signal."}).encode()
+              request = urllib.request.Request("https://api.telegram.org/bot"+token+"/sendMessage",
+                  data=body,headers={"Content-Type":"application/json"},method="POST")
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      result = json.load(response)
+                  if not result.get("ok"):
+                      raise RuntimeError("Telegram returned ok=false")
+                  print(f"{label}: TELEGRAM API ACCEPTED MESSAGE")
+              except urllib.error.HTTPError as e:
+                  print(f"{label}: HTTP {e.code}; check token, chat ID, bot permissions")
+                  failures.append(label + " HTTP " + str(e.code))
+              except Exception as e:
+                  print(f"{label}: FAILED ({type(e).__name__})")
+                  failures.append(label + " failed")
+          if failures:
+              raise SystemExit("DIAGNOSTIC FAILED: " + "; ".join(failures))
+          print("ALL CONFIGURED TELEGRAM PAIRS ACCEPTED")
+          PY
