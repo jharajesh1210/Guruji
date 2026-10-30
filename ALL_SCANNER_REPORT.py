@@ -47,9 +47,9 @@ def trades_for(workflow):
 def performance(workflow):
     files = trades_for(workflow)
     if not files:
-        return dict(total_trades="N/A", wins="N/A", losses="N/A",
-                    breakeven="N/A", win_percent="N/A", net_pnl_usdt="N/A",
-                    sum_trade_return_pct="N/A", trade_files="", data_note="No matching trade CSV")
+        return dict(total_trades="-", wins="-", losses="-",
+                    breakeven="-", win_percent="-", net_pnl_usdt="-",
+                    sum_trade_return_pct="-", trade_files="", data_note="No matching trade CSV")
     wins = losses = breakeven = 0
     pnl = 0.0
     return_pct = 0.0
@@ -94,9 +94,9 @@ def performance(workflow):
     decisive = wins + losses
     return dict(total_trades=decisive + breakeven, wins=wins, losses=losses,
                 breakeven=breakeven,
-                win_percent=round(100 * wins / decisive, 2) if decisive else "N/A",
-                net_pnl_usdt=round(pnl, 4) if pnl_count else "N/A",
-                sum_trade_return_pct=round(return_pct, 4) if return_count else "N/A",
+                win_percent=round(100 * wins / decisive, 2) if decisive else "-",
+                net_pnl_usdt=round(pnl, 4) if pnl_count else "-",
+                sum_trade_return_pct=round(return_pct, 4) if return_count else "-",
                 trade_files="; ".join(str(f) for f in files),
                 data_note=("Unclassified rows: " + str(unclassified) if unclassified else
                            "Win rate excludes zero-P&L trades; percentage sum is not account return"))
