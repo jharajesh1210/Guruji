@@ -50,7 +50,12 @@ def main():
             frequent=any(line.strip().split()[2:] == ["*","*","*"] for line in cron_lines if len(line.strip().split())==5)
         except Exception:
             frequent=False
-        if status=="completed" and conclusion not in ("success","skipped"):
+        if status in ("queued","in_progress","waiting","pending","requested"):
+            if age>3:
+                issues.append(f"{wf['name']}: STUCK {status} ({age:.1f}h)")
+            else:
+                healthy+=1
+        elif status=="completed" and conclusion not in ("success","skipped"):
             issues.append(f"{wf['name']}: {conclusion} ({age:.1f}h ago)")
         elif frequent and age>3:
             issues.append(f"{wf['name']}: NO RECENT RUN ({age:.1f}h)")
@@ -58,6 +63,8 @@ def main():
             healthy+=1
         print(f"{wf['name']}: {status}/{conclusion}, last {age:.1f}h ago")
     print(f"Healthy={healthy}, Issues={len(issues)}, Excluded/disabled={skipped}")
+    for issue in issues:
+        print("HEALTH ISSUE:", issue)
     if issues:
         msg="GURUJI SCANNER HEALTH ALERT\n"+"\n".join("- "+i for i in issues[:35])
         msg+="\n\nNote: No trade signal is not a Telegram failure. No trading code changed."
