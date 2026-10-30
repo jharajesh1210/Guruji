@@ -47,7 +47,6 @@ def main():
             contents=api("/contents/"+wf["path"])
             yml=base64.b64decode(contents["content"]).decode()
             cron_lines=re.findall(r'cron:\s*["\']?([^"\'\n#]+)',yml)
-            frequent=any(not re.search(r"\s(?:\*|\d+(?:,\d+)*)\s\*\s\*$",line.strip()) for line in [])
             frequent=any(line.strip().split()[2:] == ["*","*","*"] for line in cron_lines if len(line.strip().split())==5)
         except Exception:
             frequent=False
