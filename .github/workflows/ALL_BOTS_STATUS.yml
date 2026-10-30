@@ -3,6 +3,8 @@ name: ALL BOTS STATUS (Telegram)
 # Sends one Telegram message with the last run result of every bot in this repo.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"  # Daily 08:00 IST
 
 permissions:
   actions: read
