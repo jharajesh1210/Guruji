@@ -37,6 +37,12 @@ TRADE_FILE_MAP = {
     "BTC_SMC_NEWS_IMPACT": ["BTC_SMC_Paper_NEWS_IMPACT_trades.csv"],
     "TOP100_CRIPTO_AMC_POC_V4": ["TOP100_CRIPTO_AMC_POC_V4_trades.csv"],
     "GOLD_COMBO_PAPER": ["GOLD_COMBO_PAPER_trades.csv"],
+    "NIFTY50_EQUITY_INTRADAY": ["NIFTY50_EQUITY_PAPER_TRADES.csv"],
+    "RIL_TRADING_SYSTEM": ["RELIANCE_PAPER_TRADES.csv", "RELIANCE_ALL_TRADES.csv"],
+    "RIL_CANDLESTICK_BIBLE": ["RIL_CANDLESTICK_BIBLE_trades.csv"],
+    "Arvind_vwap_pullback_short": ["arvind_vwap_rr4_trades.csv"],
+    "Arvind_strategy_1d1h15m": ["BTC_strategy_trades.csv", "PAXG_strategy_trades.csv"],
+    "GOLD_COMBO_STRATEGY": ["XAUUSDT_1YEAR_TRADES.csv", "PAXGUSDT_1YEAR_TRADES.csv"],
 }
 
 def trades_for(workflow):
@@ -54,9 +60,12 @@ def trades_for(workflow):
 def performance(workflow):
     files = trades_for(workflow)
     if not files:
+        stem = Path(workflow.get("path", "")).stem
+        expected = TRADE_FILE_MAP.get(stem, [])
+        reason = ("Expected trade CSV not in repository checkout: " + ", ".join(expected) + ". Check workflow artifact or scanner trade export" if expected else "No mapped trade CSV; this may be a signal-only scanner or diagnostic workflow")
         return dict(total_trades="-", wins="-", losses="-",
                     breakeven="-", win_percent="-", net_pnl_usdt="-",
-                    sum_trade_return_pct="-", trade_files="", data_note="No matching trade CSV")
+                    sum_trade_return_pct="-", trade_files="", data_note=reason)
     wins = losses = breakeven = 0
     pnl = 0.0
     return_pct = 0.0
@@ -77,7 +86,7 @@ def performance(workflow):
                              ("netpnlusdt", "paperpnlusdt", "pnlusdt", "realizedpnl", "netpnl", "profitusdt", "pnl")
                              if k in row and numeric(row[k]) is not None), None)
                 pct = next((numeric(row[k]) for k in
-                            ("netreturnpctperleg", "netreturnpct", "netpct", "returnpct", "profitpct", "returnpctofequity")
+                            ("netreturnpctperleg", "netreturnpct", "netpct", "returnpct", "profitpct", "returnpctofequity", "pnlpct")
                             if k in row and numeric(row[k]) is not None), None)
                 if usdt is not None:
                     pnl += usdt
