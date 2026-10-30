@@ -1,0 +1,2 @@
+symbol,strategy,side,entry_time,exit_time,entry,exit,qty,net_inr,reason
+SHRIRAMFIN,BB_MIDDLE_REJECTION,SELL,2026-10-30T13:55:00+05:30,2026-10-30T15:10:00+05:30,827.43,823.96,90,238.85,EOD
