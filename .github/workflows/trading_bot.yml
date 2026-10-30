@@ -25,7 +25,11 @@ jobs:
 
     - name: Run Bot Script
       env:
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        CHAT_ID: ${{ secrets.CHAT_ID }}
         COINDCX_API_KEY: ${{ secrets.COINDCX_API_KEY }}
         COINDCX_SECRET_KEY: ${{ secrets.COINDCX_SECRET_KEY }}
       run: |
-        python coindcx_futures_strategy.py
+        set -o pipefail
+        python coindcx_futures_strategy.py | tee coindcx_signal_output.txt
+        python ARVIND_COINDCX_TELEGRAM_NOTIFY.py coindcx coindcx_signal_output.txt
