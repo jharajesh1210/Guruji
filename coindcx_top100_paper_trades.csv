@@ -1,0 +1,2 @@
+pair,side,entry,exit,qty,margin,leverage,pnl,reason,entry_time,exit_time
+B-ZRO_USDT,LONG,1.7661,1.7252911341339334,849.3290300662477,50.0,30,-36.1428,STOP,2026-10-30 15:40:00+00:00,2026-10-30 15:45:00+00:00
