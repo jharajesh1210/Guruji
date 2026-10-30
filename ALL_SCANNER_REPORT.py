@@ -41,9 +41,10 @@ TRADE_FILE_MAP = {
     "TOP100_CRIPTO_AMC_POC_V4": ["TOP100_CRIPTO_AMC_POC_V4_trades.csv"],
     "GOLD_COMBO_PAPER": ["GOLD_COMBO_PAPER_trades.csv"],
     "NIFTY50_EQUITY_INTRADAY": ["NIFTY50_EQUITY_PAPER_TRADES.csv"],
-    "RIL_TRADING_SYSTEM": ["RELIANCE_PAPER_TRADES.csv", "RELIANCE_ALL_TRADES.csv"],
+    "RIL_TRADING_SYSTEM": ["RELIANCE_PAPER_TRADES.csv"],
     "RIL_CANDLESTICK_BIBLE": ["RIL_CANDLESTICK_BIBLE_trades.csv"],
     "Arvind_vwap_pullback_short": ["arvind_vwap_rr4_trades.csv"],
+    "New_crypto_top100_scanner": ["paper_trades.csv"],
     "Arvind_strategy_1d1h15m": ["BTC_strategy_trades.csv", "PAXG_strategy_trades.csv"],
     "GOLD_COMBO_STRATEGY": ["XAUUSDT_1YEAR_TRADES.csv", "PAXGUSDT_1YEAR_TRADES.csv"],
 }
@@ -125,8 +126,10 @@ def performance(workflow):
         reason = ("Expected trade CSV not in repository checkout: " + ", ".join(expected) + ". Check workflow artifact or scanner trade export" if expected else "No mapped trade CSV; this may be a signal-only scanner or diagnostic workflow")
         return dict(total_trades="-", wins="-", losses="-",
                     breakeven="-", win_percent="-", net_pnl_usdt="-",
-                    sum_trade_return_pct="-", trade_files="", data_note=reason)
+                    sum_trade_return_pct="-", net_pnl_inr="-", trade_files="", data_note=reason)
     wins = losses = breakeven = 0
+    inr = 0.0
+    inr_count = 0
     pnl = 0.0
     return_pct = 0.0
     pnl_count = return_count = 0
@@ -148,13 +151,17 @@ def performance(workflow):
                 pct = next((numeric(row[k]) for k in
                             ("netreturnpctperleg", "netreturnpct", "netpct", "returnpct", "profitpct", "returnpctofequity", "pnlpct")
                             if k in row and numeric(row[k]) is not None), None)
-                if usdt is not None:
+                rupees = next((numeric(row[k]) for k in ("pnlrs", "netinr", "netpnl", "net") if k in row and numeric(row[k]) is not None), None)
+                if rupees is not None and (("pnlrs" in row) or ("netinr" in row) or ("net" in row and "netpnlusdt" not in row)):
+                    inr += rupees
+                    inr_count += 1
+                if usdt is not None and rupees is None:
                     pnl += usdt
                     pnl_count += 1
                 if pct is not None:
                     return_pct += pct
                     return_count += 1
-                metric = usdt if usdt is not None else pct
+                metric = rupees if rupees is not None and ("pnlrs" in row or "netinr" in row or "net" in row) else (usdt if usdt is not None else pct)
                 if metric is not None:
                     if metric > 0: wins += 1
                     elif metric < 0: losses += 1
@@ -171,9 +178,10 @@ def performance(workflow):
     return dict(total_trades=decisive + breakeven, wins=wins, losses=losses,
                 breakeven=breakeven,
                 win_percent=round(100 * wins / decisive, 2) if decisive else "-",
-                net_pnl_usdt=round(pnl, 4) if pnl_count else "-",
+                net_pnl_usdt=round(pnl, 4) if pnl_count and not inr_count else "-",
                 sum_trade_return_pct=round(return_pct, 4) if return_count else "-",
                 trade_files="; ".join(str(f) for f in files),
+                net_pnl_inr=round(inr, 2) if inr_count else "-",
                 data_note=("Unclassified rows: " + str(unclassified) if unclassified else
                            "Win rate excludes zero-P&L trades; percentage sum is not account return"))
 
@@ -214,7 +222,7 @@ def main():
     fields = ["scanner", "workflow", "enabled", "last_run_ist", "run_status",
               "conclusion", "run_url", "telegram", "total_trades", "wins",
               "losses", "breakeven", "win_percent", "net_pnl_usdt",
-              "sum_trade_return_pct", "trade_files", "data_note", "api_error"]
+              "sum_trade_return_pct", "net_pnl_inr", "trade_files", "data_note", "api_error"]
     with open("ALL_SCANNER_REPORT.csv", "w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
