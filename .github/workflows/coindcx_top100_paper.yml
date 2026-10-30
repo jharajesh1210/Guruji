@@ -1,0 +1,39 @@
+name: CoinDCX Top100 Paper 15m
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: coindcx-top100-paper
+  cancel-in-progress: false
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pandas numpy
+      - name: Run CoinDCX paper only
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TOP: '100'
+          MIN_SCORE: '4'
+        run: python coindcx_top100_paper.py
+      - name: Save paper ledger for next run
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add coindcx_top100_paper_state.json coindcx_top100_paper_trades.csv 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Update CoinDCX paper positions and trades [skip ci]"
+            git push
+          fi
