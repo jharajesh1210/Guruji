@@ -128,6 +128,16 @@ jobs:
             --nifty NIFTY_5m.csv \
             --out arvind_vwap_rr4_trades.csv
 
+      - name: Check current market setup and notify Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python Arvind_vwap_pullback_short.py --reliance RELIANCE_5m.csv --nifty NIFTY_5m.csv --live | tee arvind_live_setup.txt
+          python ARVIND_COINDCX_TELEGRAM_NOTIFY.py vwap arvind_live_setup.txt
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
