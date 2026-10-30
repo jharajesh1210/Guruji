@@ -7,7 +7,8 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
+from urllib.parse import urlsplit
 
 REPO = os.getenv("GITHUB_REPOSITORY", "jharajesh1210/Guruji")
 TOKEN = os.getenv("GITHUB_TOKEN", "")
@@ -60,6 +61,17 @@ def trades_for(workflow):
     return matches
 
 
+class SafeArtifactRedirect(HTTPRedirectHandler):
+    """GitHub's signed blob URL must not receive the GitHub bearer token."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected and urlsplit(newurl).netloc != urlsplit(req.full_url).netloc:
+            redirected.headers.pop("Authorization", None)
+            redirected.unredirected_hdrs.pop("Authorization", None)
+        return redirected
+
+ARTIFACT_OPENER = build_opener(SafeArtifactRedirect())
+
 def restore_artifact_trades(wf):
     """Use newest available artifact snapshot; never combine repeated run snapshots."""
     stem = Path(wf.get("path", "")).stem
@@ -85,7 +97,7 @@ def restore_artifact_trades(wf):
                 if not url:
                     continue
                 try:
-                    with urlopen(Request(url, headers=HEADERS), timeout=45) as response:
+                    with ARTIFACT_OPENER.open(Request(url, headers=HEADERS), timeout=45) as response:
                         payload = response.read(30 * 1024 * 1024 + 1)
                     if len(payload) > 30 * 1024 * 1024:
                         print("Skipping oversized artifact", artifact.get("name"))
