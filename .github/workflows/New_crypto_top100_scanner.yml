@@ -43,8 +43,8 @@ jobs:
     timeout-minutes: 10
 
     env:
-      TG_TOKEN: ${{ secrets.TG_TOKEN }}
-      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      TG_TOKEN: ${{ secrets.BOT_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.CHAT_ID }}
       TF: ${{ github.event.inputs.tf || '15m' }}
       MIN_SCORE: ${{ github.event.inputs.min_score || '4' }}
       TOP: ${{ github.event.inputs.top || '100' }}
