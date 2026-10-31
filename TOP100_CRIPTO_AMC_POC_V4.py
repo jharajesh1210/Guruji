@@ -1,21 +1,20 @@
-"""TOP100 CoinDCX Futures AMD + approximate POC forward PAPER scanner (V4).
+"""TOP100 CoinDCX Futures AMD + approximate POC forward PAPER scanner (V4.2).
 No real orders. GitHub Actions can invoke every 15 minutes.
 
-V4.1: POC entry filter switched OFF (USE_POC_FILTER=False); poc_room_r still logged.
-
-V4 (data-driven from the first 20 closed V4 trades: 40% win, +8.24R; SL = 9 trades, -10.4R):
- A. range_pct > 1.5 skipped      (4 of 4 such trades were SL, no winner lost)
- B. sweep_depth_pct > 0.18 skipped (deep 'sweep' = real breakdown; 4 of 4 SL, no winner lost)
- C. POC more than 0.25R AHEAD of entry skipped (7 of 8 such trades were SL). This is the
-    opposite of the old V4 POC idea, which wanted POC far ahead.
-    Together A+B+C on the V4 data: 20 trades +8.24R -> 12 trades +12.5R. Only 20 trades:
-    treat as a hypothesis, check skipped.csv + trades.csv after ~30 new trades.
- D. 1R lock moved from +0.10R to +0.25R so fees+slippage no longer turn 'BE' into a loss.
- E. Confirm-candle quality (close strength / volume ratio) and chase_r are LOGGED;
-    quality filter is OFF until the new columns prove useful.
- F. Telegram/state show result counts (TP/TRAIL/BE/SL), avg R per trade, last-10 R.
- Tested and rejected on V4 data: 1 entry per bar (-2.5R), BTC 4h 'alignment' (wrong sign).
- NOTE: new NAME => new state/CSV files. Update the workflow's file names.
+V4.2 (from the 21 closed trades, 24-28 Oct: +7.0R, 38% win, 10 SL = -11.6R):
+ G. signals_in_bar >= 5 => skip the WHOLE bar ('signal_cluster'). 5 such trades,
+    0 winners (-3.6R). Many coins sweeping together = a market-wide move, not a
+    local liquidity grab, so the 'sweep and reclaim' idea does not apply.
+ H. MIN_RISK_PCT 0.40 -> 0.60. Fees+slippage (~0.14% round trip) cost 0.25R+ on a
+    tight stop; the two trades under 0.60% risk (SOL, PAXG) both hit SL.
+ I. PAXG excluded (gold token: BTC filter meaningless, tiny range, SL at 0.0R MFE).
+ J. result_counts / recent_r are rebuilt from trades.csv if the state lost them
+    (state showed SL:1 and one recent R although 21 trades were closed).
+ Already in V4.1 (kept): range_pct > 1.5, sweep_depth > 0.18, POC ahead > 0.25R,
+    1R lock at +0.25R. Those filters did not exist when most of the 21 trades ran.
+ Caveat: 21 trades is a tiny sample. Longs are weak (14 trades -3.8R) and shorts
+    strong (7 trades +10.8R); that may be regime, not edge, so no long ban yet.
+ NOTE: NAME unchanged => existing state/CSV files continue.
 """
 import csv
 import json
@@ -30,7 +29,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-NAME = 'TOP100_CRIPTO_AMC_POC_V4'  # new name => fresh state/CSVs (old V4 files untouched)
+NAME = 'TOP100_CRIPTO_AMC_POC_V4'  # unchanged => state/CSVs continue
 STATE = Path(NAME + '_state.json')
 TRADES = Path(NAME + '_trades.csv')
 SIGNALS = Path(NAME + '_signals.csv')
@@ -44,6 +43,7 @@ ACCUM_HOURS = 4
 MAX_RANGE_PCT = 2.0             # absolute cap on accumulation range
 RANGE_ATR_MULT = 1.5            # range must be <= 1.5 x hourly ATR
 ATR_PERIOD = 14
+EXCLUDE_SYMBOLS = ('PAXG',)     # V4.2: gold token, does not behave like the crypto book
 
 # ---------------- Entry / risk ----------------
 RR_VALUES = (4,)
@@ -52,28 +52,26 @@ SLIP_SIDE = 0.0002
 ENTRY_MAX_DELAY_MIN = 14        # GitHub cron is often late
 MAX_ENTRY_DEVIATION_PCT = 0.30  # latest 5m close vs confirm-bar close (abs sanity gate)
 MAX_CHASE_R = 0.35              # adverse move since confirm close, in R of the trade
-MAX_TRADE_RANGE_PCT = 1.5       # V4 data: range 1.5-2.0% => 4 of 4 SL
-MAX_SWEEP_DEPTH_PCT = 0.18      # V4 data: depth > 0.18% => 4 of 4 SL
+MAX_TRADE_RANGE_PCT = 1.5       # range 1.5-2.0% => 4 of 4 SL
+MAX_SWEEP_DEPTH_PCT = 0.18      # depth > 0.18% => 4 of 4 SL
 USE_POC_AHEAD_FILTER = True     # skip if POC is further than POC_MAX_AHEAD_R ahead of entry
-POC_MAX_AHEAD_R = 0.25          # V4 data: poc_room_r > 0.25 => 7 of 8 SL
-USE_CONFIRM_QUALITY = False  # log only until validated
+POC_MAX_AHEAD_R = 0.25          # poc_room_r > 0.25 => 7 of 8 SL
+USE_CONFIRM_QUALITY = False     # log only until validated
 MIN_CLOSE_STRENGTH = 0.60       # confirm bar must close in top 60% (LONG) / bottom 40% (SHORT)
 MIN_CONFIRM_VOL_RATIO = 1.0     # confirm bar volume / mean of previous 8 bars
 CONFIRM_BUFFER = 0.0008
 SL_ATR_BUFFER = 0.15            # extra stop distance beyond wick, in hourly ATR
-MIN_RISK_PCT = 0.40             # below this fees eat the trade
+MIN_RISK_PCT = 0.60             # V4.2: was 0.40; below this fees eat the trade
 MAX_RISK_PCT = 2.00
 
 # ---------------- POC filter ----------------
-# OFF by default (V4.1): entry is above the sweep high (LONG) / below the sweep
-# low (SHORT) while POC sits inside the accumulation range, so "POC >= 0.5R ahead"
-# rejected ~3 of 4 signals in the self-test. poc_room_r is still logged per trade,
-# so the effect can be checked from real data before re-enabling.
+# OFF by default (V4.1): poc_room_r is still logged per trade.
 USE_POC_FILTER = False
 POC_MIN_R = 0.5                 # POC must be >= 0.5R away on the profit side
 
 # ---------------- Correlation / BTC filter ----------------
 MAX_ENTRIES_PER_BAR = 2         # 1 per bar tested worse on V4 data
+MAX_SIGNALS_IN_BAR = 5          # V4.2: >= this many signals in one bar => market-wide move, skip all
 MAX_OPEN_TRADES = 4
 MAX_SAME_DIR_OPEN = 4           # = off; lower it if same-direction clusters keep losing
 USE_BTC_FILTER = True
@@ -83,7 +81,7 @@ BTC_MAX_4H_PCT = 3.0
 BTC_ALIGN_PCT = 0.5             # skip LONG if BTC 1h < -0.5%, SHORT if > +0.5%
 
 # ---------------- Time filter (log first, filter later) ----------------
-SKIP_HOURS_UTC = ()             # e.g. (20, 21, 22, 23) once you have data
+SKIP_HOURS_UTC = ()             # 21-23 UTC: 8 trades -1.0R so far; wait for more data
 
 # ---------------- Trailing ----------------
 # reached R -> locked stop in R. Lock activates from the NEXT 5m candle.
@@ -170,6 +168,29 @@ def load_state():
         data.setdefault(key, default)
 
     return data
+
+
+def backfill_stats(state):
+    """V4.2: result_counts / recent_r were added after many trades had closed, so
+    the state under-reported them. Rebuild once from trades.csv when it matches."""
+    counts = state.get('result_counts') or {}
+    if sum(counts.values()) >= state['closed_count'] or not TRADES.exists():
+        return
+
+    try:
+        df = pd.read_csv(TRADES)
+    except Exception as exc:
+        LOG.warning('Backfill skipped: %s', exc)
+        return
+
+    if len(df) != state['closed_count'] or 'result' not in df or 'net_r' not in df:
+        LOG.warning('Backfill skipped: trades.csv rows (%d) != closed_count (%d)',
+                    len(df), state['closed_count'])
+        return
+
+    state['result_counts'] = {k: int(v) for k, v in df['result'].value_counts().items()}
+    state['recent_r'] = [round(float(x), 3) for x in df['net_r'].tail(10)]
+    LOG.info('Backfilled result_counts and recent_r from trades.csv')
 
 
 def save_state(state):
@@ -785,6 +806,18 @@ def open_ranked_signals(state, signals, btc):
         total = len(group)
         opened = 0
 
+        # V4.2: many coins sweeping in the same bar = market-wide move, not a local
+        # liquidity grab. 5 such trades in the data, 0 winners (-3.6R).
+        if total >= MAX_SIGNALS_IN_BAR:
+            for sig in group:
+                log_skip(sig['pair'], sig['direction'], bar_end,
+                         f'signal_cluster_{total}', {
+                             'range_pct': round(sig['range_pct'], 3),
+                             'sweep_depth_pct': round(sig['sweep_depth_pct'], 3)
+                         })
+            LOG.info('Bar %s: %d signals, cluster skip', iso(bar_end), total)
+            continue
+
         for sig in group:
             if opened >= MAX_ENTRIES_PER_BAR:
                 log_skip(sig['pair'], sig['direction'], bar_end, 'max_entries_per_bar')
@@ -802,6 +835,7 @@ def main():
     )
 
     state = load_state()
+    backfill_stats(state)
 
     LOG.info('Starting %s | PAPER ONLY | %s', NAME, datetime.now(timezone.utc).isoformat())
 
@@ -816,7 +850,8 @@ def main():
 
         candidates = [
             (symbol, rank, futures[symbol])
-            for symbol, rank in market if symbol in futures
+            for symbol, rank in market
+            if symbol in futures and symbol not in EXCLUDE_SYMBOLS
         ]
         LOG.info('Top100 matched to CoinDCX futures: %d', len(candidates))
 
