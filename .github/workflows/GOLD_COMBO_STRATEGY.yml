@@ -50,6 +50,44 @@ jobs:
             --days 365 \
             --save-trades PAXGUSDT_1YEAR_TRADES.csv
 
+
+      - name: Telegram backtest completion report
+        if: always()
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          JOB_STATUS: ${{ job.status }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os, csv, json, urllib.request
+          from pathlib import Path
+          token, chat = os.getenv("BOT_TOKEN"), os.getenv("CHAT_ID")
+          if not token or not chat:
+              raise SystemExit("Telegram BOT_TOKEN/CHAT_ID missing")
+          lines = ["GOLD COMBO STRATEGY — 1 YEAR BACKTEST",
+                   "Job status: " + os.getenv("JOB_STATUS", "unknown")]
+          for symbol in ("XAUUSDT", "PAXGUSDT"):
+              path = Path(symbol + "_1YEAR_TRADES.csv")
+              if not path.is_file():
+                  lines.append(symbol + ": trade CSV not generated")
+                  continue
+              with path.open(encoding="utf-8-sig", newline="") as f:
+                  rows = list(csv.DictReader(f))
+              lines.append(symbol + ": " + str(len(rows)) + " historical trade rows")
+          lines.append("Historical backtest only — no live order.")
+          lines.append("https://github.com/" + os.environ["REPOSITORY"] + "/actions/runs/" + os.environ["RUN_ID"])
+          payload = json.dumps({"chat_id": chat, "text": "\\n".join(lines)}).encode()
+          req = urllib.request.Request("https://api.telegram.org/bot" + token + "/sendMessage",
+                  data=payload, headers={"Content-Type": "application/json"}, method="POST")
+          with urllib.request.urlopen(req, timeout=20) as response:
+              result = json.load(response)
+          if not result.get("ok"):
+              raise SystemExit("Telegram returned ok=false")
+          print("GOLD BACKTEST TELEGRAM API ACCEPTED")
+          PY
+
       - name: Upload Results
         if: always()
         uses: actions/upload-artifact@v4
