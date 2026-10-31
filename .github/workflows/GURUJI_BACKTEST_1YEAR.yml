@@ -1,0 +1,35 @@
+name: Guruji 1-Year Backtest (Phase 1 Gold)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gold-book-365d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pandas numpy requests
+      - name: CoinDCX Gold 365-day historical backtest
+        run: |
+          set -o pipefail
+          python GOLD_BOOK_COINCDX_BACKTEST.py --days 365 --risk-usd 10 2>&1 | tee gold_backtest.log
+      - name: Upload all outputs including failure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-book-365d-results
+          path: |
+            GOLD_BOOK_DATA_STATUS.json
+            GOLD_BOOK_ALL_TRADES.csv
+            GOLD_BOOK_SUMMARY.csv
+            XAUUSDT_TRADES.csv
+            PAXGUSDT_TRADES.csv
+            gold_backtest.log
+          if-no-files-found: warn
