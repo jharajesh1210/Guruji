@@ -35,6 +35,7 @@ jobs:
           if [ "$MODE" = "backtest" ]; then
             python GOLD_BOOK.py --days 365
           else
+            set -o pipefail
             python GOLD_BOOK.py --scan | tee gold_scan.txt
           fi
       - name: Telegram scan result
@@ -44,8 +45,8 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
-            echo 'Telegram secrets missing; results remain in Actions logs.'
-            exit 0
+            echo 'ERROR: Telegram secrets missing (TG_TOKEN or TG_CHAT_ID).'
+            exit 1
           fi
           if grep -Eq 'XAUUSDT: (LONG|SHORT) signal|PAXGUSDT: (LONG|SHORT) signal' gold_scan.txt; then
             curl --fail --silent --show-error --retry 2 \
