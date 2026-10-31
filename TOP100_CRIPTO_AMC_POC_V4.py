@@ -37,8 +37,8 @@ SKIPPED = Path(NAME + '_skipped.csv')
 UNIVERSE = Path(NAME + '_universe.csv')
 
 # ---------------- Universe / accumulation ----------------
-MIN_TURNOVER = 500_000          # avg hourly USDT turnover (last TURNOVER_HOURS)
-TURNOVER_HOURS = 6
+MIN_TURNOVER = 10_000_000       # minimum approximate USDT turnover over last 24 completed 1h candles
+TURNOVER_HOURS = 24
 ACCUM_HOURS = 4
 MAX_RANGE_PCT = 2.0             # absolute cap on accumulation range
 RANGE_ATR_MULT = 1.5            # range must be <= 1.5 x hourly ATR
@@ -397,8 +397,10 @@ def volume_candidate(item):
     if len(hourly) < ATR_PERIOD + ACCUM_HOURS + 1:
         return None
 
+    if len(hourly) < TURNOVER_HOURS:
+        return None
     recent = hourly.tail(TURNOVER_HOURS)
-    turnover = float((recent['volume'] * recent['close']).mean())
+    turnover = float((recent['volume'] * recent['close']).sum())
 
     return {
         'symbol': symbol, 'rank': rank, 'pair': pair,
@@ -869,7 +871,7 @@ def main():
             for task in as_completed(tasks):
                 try:
                     item = task.result()
-                    if item and item['turnover'] > MIN_TURNOVER:
+                    if item and item['turnover'] >= MIN_TURNOVER:
                         eligible.append(item)
                 except Exception as exc:
                     LOG.warning('Coin scan failed: %s', exc)
@@ -880,14 +882,14 @@ def main():
             [
                 {
                     'symbol': x['symbol'], 'rank': x['rank'], 'pair': x['pair'],
-                    'avg_hourly_turnover_usdt_approx': round(x['turnover'], 2)
+                    'turnover_24h_usdt_approx': round(x['turnover'], 2)
                 }
                 for x in eligible
             ],
-            columns=['symbol', 'rank', 'pair', 'avg_hourly_turnover_usdt_approx']
+            columns=['symbol', 'rank', 'pair', 'turnover_24h_usdt_approx']
         ).to_csv(UNIVERSE, index=False)
 
-        LOG.info('Passed >%d avg hourly turnover: %d', MIN_TURNOVER, len(eligible))
+        LOG.info('Passed >=%d USDT last 24h turnover: %d', MIN_TURNOVER, len(eligible))
 
         signals = []
         for coin in eligible:
