@@ -1,23 +1,9 @@
 {
-  "last_bar": 1793474400000,
+  "last_bar": 1793476200000,
   "setup": null,
-  "positions": [
-    {
-      "side": "LONG",
-      "rr": 4,
-      "entry": 77666.0,
-      "stop": 77512.0,
-      "initial_stop": 77512.0,
-      "initial_risk": 154.0,
-      "target": 78282.0,
-      "entry_time": 1793469900000,
-      "trade_mode": "SINGLE_TRAIL_4R",
-      "max_rr_reached": 0,
-      "margin_usdt": 100.0
-    }
-  ],
-  "closed": 1,
+  "positions": [],
+  "closed": 2,
   "wins": 1,
-  "losses": 0,
-  "net_pct": 0.262785
+  "losses": 1,
+  "net_pct": -0.0755
 }
