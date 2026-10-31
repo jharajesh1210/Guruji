@@ -10,7 +10,7 @@
       "target": 96.54,
       "risk": 0.4200000000000017,
       "entry_time_utc": "2026-10-31T10:40+00:00",
-      "last_checked_t": 1793460600000
+      "last_checked_t": 1793462400000
     },
     {
       "symbol": "SOLUSDT",
@@ -22,7 +22,7 @@
       "target": 96.96000000000001,
       "risk": 0.4200000000000017,
       "entry_time_utc": "2026-10-31T10:40+00:00",
-      "last_checked_t": 1793460600000
+      "last_checked_t": 1793462400000
     },
     {
       "symbol": "SOLUSDT",
@@ -34,7 +34,7 @@
       "target": 97.38000000000001,
       "risk": 0.4200000000000017,
       "entry_time_utc": "2026-10-31T10:40+00:00",
-      "last_checked_t": 1793460600000
+      "last_checked_t": 1793462400000
     }
   ],
   "entered_days": {
@@ -44,9 +44,9 @@
     "ETHUSDT": "2026-10-26"
   },
   "last_closed_bar": {
-    "BTCUSDT": 1793460600000,
-    "ETHUSDT": 1793460600000,
-    "SOLUSDT": 1793460600000,
-    "BNBUSDT": 1793460600000
+    "BTCUSDT": 1793462400000,
+    "ETHUSDT": 1793462400000,
+    "SOLUSDT": 1793462400000,
+    "BNBUSDT": 1793462400000
   }
 }
