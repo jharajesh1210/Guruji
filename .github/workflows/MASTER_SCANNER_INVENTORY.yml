@@ -1,0 +1,29 @@
+name: Master Scanner Inventory
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 2 * * 0'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Inventory Crypto Scanners
+        run: python CRYPTO_MASTER.py --list
+      - name: Inventory Share Scanners
+        run: python SHARE_MASTER.py --list
+      - name: Upload scanner inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: guruji-scanner-inventory
+          path: master_reports/*_scanner_inventory.csv
+          if-no-files-found: error
