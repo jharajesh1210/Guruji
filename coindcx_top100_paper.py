@@ -65,14 +65,25 @@ def close(st,pair,p,price,why,t):
  fees=(price+p["entry"])*p["qty"]*FEE
  pnl=gross-fees
  st["realized_pnl"]+=pnl;st["closed"]+=1;st["wins"]+=int(pnl>0)
- row={"pair":pair,"side":p["side"],"entry":p["entry"],"exit":price,"qty":p["qty"],"margin":MARGIN,"leverage":LEV,"pnl":round(pnl,4),"reason":why,"entry_time":p["time"],"exit_time":t}
+ row={"pair":pair,"side":p["side"],"entry":p["entry"],"exit":price,"qty":p["qty"],"margin":MARGIN,"leverage":LEV,"pnl":round(pnl,4),"reason":why,"entry_time":p["time"],"exit_time":t,"score":p.get("score",""),"strategies":",".join(p.get("strategies",[]))}
  exists=os.path.exists(CSV)
  with open(CSV,"a",newline="") as f:
-  w=csv.DictWriter(f,fieldnames=row.keys())
+  fields=list(row.keys())
+  if exists:
+   with open(CSV,newline="") as oldf:
+    reader=csv.DictReader(oldf)
+    oldfields=reader.fieldnames or []
+    if oldfields and oldfields!=fields:
+     oldrows=list(reader)
+     with open(CSV,"w",newline="") as newf:
+      writer=csv.DictWriter(newf,fieldnames=fields,extrasaction="ignore")
+      writer.writeheader()
+      writer.writerows(oldrows)
+  w=csv.DictWriter(f,fieldnames=fields)
   if not exists:w.writeheader()
   w.writerow(row)
  del st["positions"][pair]
- alert(f"COINDCX PAPER CLOSE {p['side']} {pair} {why} | PnL {pnl:+.2f} USDT | Total {st['realized_pnl']:+.2f}")
+ alert(f"COINDCX PAPER CLOSE {p['side']} {pair} {why} | Strategies {','.join(p.get('strategies',[])) or 'legacy/unknown'} | Score {p.get('score','unknown')} | PnL {pnl:+.2f} USDT | Total {st['realized_pnl']:+.2f}")
 def manage(st,pair,d):
  if pair not in st["positions"]:return
  p=st["positions"][pair];direction=1 if p["side"]=="LONG" else -1
@@ -138,9 +149,10 @@ def main():
    entry=float(res["price"]);risk=1.5*float(res["atr"])
    if not math.isfinite(risk) or risk<=0:continue
    direction=1 if side=="LONG" else -1
-   p={"side":side,"entry":entry,"risk":risk,"qty":NOTIONAL/entry,"sl":entry-direction*risk,"lock":0,"time":last,"score":res["score"]}
+   matched=[name for name,value in res["scores"].items() if value==direction]
+   p={"side":side,"entry":entry,"risk":risk,"qty":NOTIONAL/entry,"sl":entry-direction*risk,"lock":0,"time":last,"score":res["score"],"strategies":matched}
    st["positions"][pair]=p
-   alert(f"COINDCX PAPER OPEN {side} {pair} @ {entry:.6g} | Score {res['score']} | Margin 50 USDT x30 | SL {p['sl']:.6g} | TP {entry+direction*4*risk:.6g}")
+   alert(f"COINDCX PAPER OPEN {side} {pair} @ {entry:.6g} | Score {res['score']} | Strategies {','.join(matched)} | Margin 50 USDT x30 | SL {p['sl']:.6g} | TP {entry+direction*4*risk:.6g}")
   except Exception as exc:
    print("SKIP",pair,type(exc).__name__,str(exc)[:160],flush=True)
   finally:save(st)
