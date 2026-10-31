@@ -25,7 +25,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           TOP: '100'
-          MIN_SCORE: '4'
+          MIN_SCORE: '5'
         run: python coindcx_top100_paper.py
       - name: Save paper ledger for next run
         if: always()
