@@ -357,7 +357,7 @@ def approximate_poc(df):
     return float((edges[best] + edges[best + 1]) / 2)
 
 
-def accumulation(hourly, sweep_start):
+def accumulation(hourly, sweep_start, df5):
     prior = hourly[hourly.index + pd.Timedelta(hours=1) <= sweep_start]
 
     if len(prior) < max(ACCUM_HOURS, ATR_PERIOD + 1):
@@ -382,9 +382,18 @@ def accumulation(hourly, sweep_start):
     if (high - low) > RANGE_ATR_MULT * atr:
         return None
 
+    # POC uses exactly 48 complete 5m candles across the same four
+    # completed hourly accumulation candles; never include sweep data.
+    window_start = segment.index[0]
+    window_end = segment.index[-1] + pd.Timedelta(hours=1)
+    poc_bars = df5[(df5.index >= window_start) &
+                   (df5.index + pd.Timedelta(minutes=5) <= window_end)]
+    if len(poc_bars) != ACCUM_HOURS * 12:
+        return None  # fail closed: do not use partial or future 5m data
+
     return {
         'high': high, 'low': low,
-        'poc': approximate_poc(segment),
+        'poc': approximate_poc(poc_bars),
         'atr': atr, 'range_pct': range_pct
     }
 
@@ -760,7 +769,7 @@ def process_coin(state, coin, cached_5m, signals_out):
             elif confirmed:
                 LOG.info('Old confirmed signal skipped safely: %s %s', pair, iso(start))
 
-        region = accumulation(coin['hourly'], start)
+        region = accumulation(coin['hourly'], start, cached_5m[pair])
 
         if region is not None:
             hi = region['high']
