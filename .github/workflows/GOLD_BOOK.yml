@@ -41,26 +41,29 @@ jobs:
       - name: Telegram scan result
         if: ${{ (github.event.inputs.mode || 'scan') == 'scan' }}
         env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          TOKEN="${TG_TOKEN:-${TELEGRAM_BOT_TOKEN:-$BOT_TOKEN}}"
-          DEST="${TG_CHAT_ID:-${TELEGRAM_CHAT_ID:-$CHAT_ID}}"
+          TOKEN="${BOT_TOKEN:-${TG_TOKEN:-$TELEGRAM_BOT_TOKEN}}"
+          DEST="${CHAT_ID:-${TG_CHAT_ID:-$TELEGRAM_CHAT_ID}}"
           if [ -z "$TOKEN" ] || [ -z "$DEST" ]; then
-            echo 'ERROR: No Telegram credentials found. Configure TG_TOKEN and TG_CHAT_ID (or TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID).'
+            echo 'ERROR: Telegram configuration unavailable.'
+            if [ -z "$TOKEN" ]; then echo 'Missing bot token: BOT_TOKEN, TG_TOKEN, TELEGRAM_BOT_TOKEN'; fi
+            if [ -z "$DEST" ]; then echo 'Missing chat ID: CHAT_ID, TG_CHAT_ID, TELEGRAM_CHAT_ID'; fi
             exit 1
           fi
+          echo 'Telegram credentials available (values hidden).'
           if grep -Eq 'XAUUSDT: (LONG|SHORT) signal|PAXGUSDT: (LONG|SHORT) signal' gold_scan.txt; then
             curl --fail --silent --show-error --retry 2 \
               --data-urlencode "chat_id=$DEST" \
               --data-urlencode "text@-" \
               "https://api.telegram.org/bot${TOKEN}/sendMessage" < gold_scan.txt
           else
-            echo 'No signal; no Telegram alert.'
+            echo 'No trade signal; Telegram message not sent.'
           fi
       - name: Upload backtest CSV
         if: ${{ github.event.inputs.mode == 'backtest' }}
