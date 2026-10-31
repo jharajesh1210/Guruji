@@ -36,5 +36,29 @@ jobs:
           test ! -f coindcx_top100_paper_trades.csv || git add coindcx_top100_paper_trades.csv
           if ! git diff --cached --quiet; then
             git commit -m "Update CoinDCX paper positions and trades [skip ci]"
-            git push
+            for attempt in 1 2 3 4 5; do
+              git fetch origin main
+              if ! git rebase origin/main; then
+                git rebase --abort || true
+                echo "::error::Paper ledger rebase conflict; refusing to overwrite trade history."
+                exit 1
+              fi
+              if git push origin HEAD:main; then
+                echo "Paper ledger saved successfully"
+                exit 0
+              fi
+              echo "Push race on attempt $attempt; retrying..."
+              sleep $((attempt * 2))
+            done
+            echo "::error::Could not save paper ledger after 5 attempts"
+            exit 1
           fi
+      - name: Upload paper ledger backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coindcx-top100-paper-ledger-${{ github.run_id }}
+          path: |
+            coindcx_top100_paper_state.json
+            coindcx_top100_paper_trades.csv
+          if-no-files-found: warn
