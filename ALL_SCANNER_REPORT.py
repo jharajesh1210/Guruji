@@ -32,6 +32,8 @@ def normalize(value):
     return re.sub(r"[^a-z0-9]", "", str(value).lower())
 
 TRADE_FILE_MAP = {
+    "coindcx_top100_paper": ["coindcx_top100_paper_trades.csv"],
+    "trading_bot": ["coindcx_futures_paper_trades.csv"],
     "TOP100_ORIGINAL": ["TOP100_CRIPTO_AMC_POC_trades.csv"],
     "TOP100_NEWS_IMPACT": ["TOP100_CRIPTO_AMC_POC_NEWS_IMPACT_trades.csv"],
     "ASIAN_LONDON_NY_ORIGINAL": ["ASIAN_LONDON_NY_PAPER_trades.csv"],
@@ -116,7 +118,7 @@ def restore_artifact_trades(wf):
         print("Artifact lookup failed for", stem, str(exc)[:200])
     return restored
 
-SIGNAL_ONLY = {"New_crypto_top100_scanner", "trading_bot"}
+SIGNAL_ONLY = {"New_crypto_top100_scanner"}
 BACKTEST_ONLY = {"Arvind_strategy_1d1h15m"}
 
 def performance(workflow):
