@@ -71,7 +71,7 @@ CONFIGS = {c.symbol: c for c in (CFG_XAU, CFG_PAXG)}
 # --------------------------------------------------------------------------
 # Data
 # --------------------------------------------------------------------------
-def fetch_klines(symbol, days, interval="5m"):
+def fetch_klines(symbol, days, interval="5m", allow_partial=False):
     """Fetch closed 5m futures candles from CoinDCX; never substitute fake data."""
     import requests
     if interval != "5m":
@@ -122,8 +122,10 @@ def fetch_klines(symbol, days, interval="5m"):
     df = df[df.index < pd.Timestamp.now(tz="UTC").floor("5min")]
     coverage_days = (df.index.max() - df.index.min()).total_seconds() / 86400
     print(f"{symbol}: historical coverage {coverage_days:.1f} days, {len(df)} closed candles", flush=True)
-    if coverage_days < days - 2:
+    if coverage_days < days - 2 and not allow_partial:
         raise RuntimeError(f"{symbol}: requested {days} days, CoinDCX only supplied {coverage_days:.1f} days; full-year backtest NOT VALID")
+    if coverage_days < days - 2 and allow_partial:
+        print(f"WARNING PARTIAL HISTORY: {symbol}: {coverage_days:.1f} of {days} days; results cannot be labeled full-year", flush=True)
     if len(df) < 100:
         raise RuntimeError(f"{symbol}: insufficient 5m candles: {len(df)}")
     return df
@@ -298,6 +300,7 @@ def scan(frames, cfgs):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=365)
+    ap.add_argument("--allow-partial-history", action="store_true", help="allow incomplete CoinDCX history; result is partial, NOT a 365-day backtest")
     ap.add_argument("--risk-usd", type=float, default=10.0, help="1R = kitne $")
     ap.add_argument("--skip-dates", default="", help="comma list YYYY-MM-DD (NFP/CPI/FOMC)")
     ap.add_argument("--scan", action="store_true", help="sirf latest signal")
@@ -320,7 +323,7 @@ def main():
     days = 130 if a.scan else a.days
     frames = {}
     for k, (s, cfg) in enumerate(CONFIGS.items()):
-        raw = synthetic_klines(s, days, seed=k + 1) if a.synthetic else fetch_klines(s, days)
+        raw = synthetic_klines(s, days, seed=k + 1) if a.synthetic else fetch_klines(s, days, allow_partial=a.allow_partial_history)
         frames[s] = prepare(raw, cfg, skip)
         print(f"{s}: {len(raw)} candles, signals {int((frames[s].sig != 0).sum())}")
 
