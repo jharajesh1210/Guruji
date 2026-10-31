@@ -72,31 +72,52 @@ CONFIGS = {c.symbol: c for c in (CFG_XAU, CFG_PAXG)}
 # Data
 # --------------------------------------------------------------------------
 def fetch_klines(symbol, days, interval="5m"):
+    """Fetch closed 5m futures candles from CoinDCX; never substitute fake data."""
     import requests
-    step_ms = 5 * 60 * 1000
-    end = int(time.time() * 1000)
-    cur = end - days * 86400 * 1000
+    if interval != "5m":
+        raise ValueError("GOLD_BOOK supports 5m only")
+    api = "https://api.coindcx.com/exchange/v1/derivatives/futures/data/active_instruments"
+    resp = requests.get(api, params={"margin_currency_short_name[]": "USDT"}, timeout=25)
+    resp.raise_for_status()
+    instruments = resp.json()
+    if isinstance(instruments, dict):
+        instruments = instruments.get("data", instruments.get("instruments", []))
+    if not isinstance(instruments, list):
+        raise RuntimeError("CoinDCX active instruments: unexpected response")
+    suffix = "-" + symbol[:-4] + "_USDT"
+    pairs = [p for p in instruments if isinstance(p, str) and p.upper().endswith(suffix)]
+    if not pairs:
+        raise RuntimeError(f"{symbol}: no active CoinDCX USDT futures pair")
+    pair = sorted(pairs)[0]
+    print(f"{symbol}: CoinDCX futures pair {pair}", flush=True)
+    endpoint = "https://public.coindcx.com/market_data/candlesticks"
+    end = int(time.time())
+    cursor = end - days * 86400
     rows = []
-    while cur < end:
-        r = requests.get(BINANCE_FUTURES + "/fapi/v1/klines",
-                         params=dict(symbol=symbol, interval=interval,
-                                     startTime=cur, limit=1500), timeout=20)
+    while cursor < end:
+        stop = min(cursor + 3 * 86400, end)
+        r = requests.get(endpoint, params={"pair": pair, "from": cursor,
+                         "to": stop, "resolution": "5", "pcode": "f"}, timeout=30)
         r.raise_for_status()
         data = r.json()
-        if not data:
-            break
-        rows += data
-        cur = data[-1][0] + step_ms
-        time.sleep(0.15)
+        if not isinstance(data, dict) or data.get("s") != "ok" or not isinstance(data.get("data"), list):
+            raise RuntimeError(f"{symbol}: CoinDCX candle API error: {str(data)[:200]}")
+        rows.extend(data["data"])
+        cursor = stop
+        time.sleep(0.08)
     if not rows:
-        raise RuntimeError(f"{symbol}: koi data nahi mila")
-    df = pd.DataFrame(rows, columns=["t", "open", "high", "low", "close", "volume",
-                                     "ct", "qv", "n", "tb", "tq", "ig"])
-    df.index = pd.to_datetime(df["t"], unit="ms", utc=True)
+        raise RuntimeError(f"{symbol}: CoinDCX returned no futures candles")
+    df = pd.DataFrame(rows)
+    needed = {"time", "open", "high", "low", "close", "volume"}
+    if not needed.issubset(df.columns):
+        raise RuntimeError(f"{symbol}: missing candle fields {needed - set(df.columns)}")
+    df.index = pd.to_datetime(df["time"], unit="ms", utc=True)
     df = df[["open", "high", "low", "close", "volume"]].astype(float)
-    df = df[~df.index.duplicated()].sort_index()
-    return df.iloc[:-1]  # aakhri candle adhoori hoti hai
-
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    df = df[df.index < pd.Timestamp.now(tz="UTC").floor("5min")]
+    if len(df) < 100:
+        raise RuntimeError(f"{symbol}: insufficient 5m candles: {len(df)}")
+    return df
 
 def synthetic_klines(symbol, days, seed):
     """Sirf code test karne ke liye nakli gold-jaisa data."""
