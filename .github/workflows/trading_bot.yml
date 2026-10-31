@@ -2,34 +2,68 @@ name: CoinDCX Futures Bot
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # Har 15 minute par run hoga
-  workflow_dispatch:        # Manual run button ke liye
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: coindcx-btc-futures-paper
+  cancel-in-progress: false
 
 jobs:
   run-strategy:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests pandas pandas-ta
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests pandas numpy
 
-    - name: Run Bot Script
-      env:
-        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        CHAT_ID: ${{ secrets.CHAT_ID }}
-        COINDCX_API_KEY: ${{ secrets.COINDCX_API_KEY }}
-        COINDCX_SECRET_KEY: ${{ secrets.COINDCX_SECRET_KEY }}
-      run: |
-        set -o pipefail
-        python coindcx_futures_strategy.py | tee coindcx_signal_output.txt
-        python ARVIND_COINDCX_TELEGRAM_NOTIFY.py coindcx coindcx_signal_output.txt
+      - name: Verify Paper Bot Syntax
+        run: python -m py_compile coindcx_futures_strategy.py
+
+      - name: Run CoinDCX BTC Paper Bot and Telegram Confirmation
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python -u coindcx_futures_strategy.py
+
+      - name: Save Paper State and Trades
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for f in coindcx_futures_paper_state.json coindcx_futures_paper_trades.csv; do
+            if [ -f "$f" ]; then git add -f "$f"; fi
+          done
+          if git diff --cached --quiet; then
+            echo "No paper state changes"
+            exit 0
+          fi
+          git commit -m "Update CoinDCX BTC paper state [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Upload Paper Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: COINDCX_BTC_FUTURES_PAPER
+          path: |
+            coindcx_futures_paper_state.json
+            coindcx_futures_paper_trades.csv
+          if-no-files-found: warn
