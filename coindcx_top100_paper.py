@@ -99,8 +99,22 @@ def main():
  active={x for x in instruments if x.startswith("B-") and x.endswith("_USDT")}
  prices=get(PUB+"/market_data/v3/current_prices/futures/rt").get("prices",{})
  ranking=sorted(((p,float(v.get("v",0))) for p,v in prices.items() if p in active and isinstance(v,dict)),key=lambda x:x[1],reverse=True)
- selected=[p for p,_ in ranking[:TOP]]
+ # Select only futures with at least 10 million USDT 24h turnover.
+ # CoinDCX ticker v is base-asset volume; convert to USDT using last price.
+ eligible=[]
+ for p,v in ranking:
+  ticker=prices[p]
+  try:
+   last_price=float(ticker.get("ls",0))
+   turnover=v*last_price
+   if math.isfinite(turnover) and turnover>=10_000_000:
+    eligible.append(p)
+  except (TypeError,ValueError,OverflowError):
+   continue
+ selected=eligible[:TOP]
+ # Always manage existing paper positions even if volume falls below threshold.
  selected=list(dict.fromkeys(list(st["positions"])+selected))
+ print(f"VOLUME FILTER: {len(eligible)} eligible (24h >= 10M USDT); {len(selected)} selected including open positions",flush=True)
  if not selected:raise RuntimeError("No CoinDCX USDT futures instruments returned")
  for pair in selected:
   try:
