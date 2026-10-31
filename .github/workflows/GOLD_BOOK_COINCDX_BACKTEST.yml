@@ -1,0 +1,39 @@
+name: GOLD BOOK CoinDCX 1-Year Backtest
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Backtest days"
+        required: true
+        default: "365"
+      risk_usd:
+        description: "USD per 1R"
+        required: true
+        default: "10"
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install pandas numpy requests
+      - name: Run CoinDCX 5m historical backtest
+        run: python GOLD_BOOK_COINCDX_BACKTEST.py --days "${{ inputs.days }}" --risk-usd "${{ inputs.risk_usd }}"
+      - name: Upload backtest reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GOLD_BOOK_COINCDX_1YEAR_REPORTS
+          path: |
+            GOLD_BOOK_ALL_TRADES.csv
+            GOLD_BOOK_SUMMARY.csv
+            GOLD_BOOK_DATA_STATUS.json
+            XAUUSDT_TRADES.csv
+            PAXGUSDT_TRADES.csv
+          if-no-files-found: warn
