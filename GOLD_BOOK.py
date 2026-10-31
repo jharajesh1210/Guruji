@@ -100,9 +100,14 @@ def fetch_klines(symbol, days, interval="5m"):
                          "to": stop, "resolution": "5", "pcode": "f"}, timeout=30)
         r.raise_for_status()
         data = r.json()
-        if not isinstance(data, dict) or data.get("s") != "ok" or not isinstance(data.get("data"), list):
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+            raise RuntimeError(f"{symbol}: CoinDCX candle API malformed: {str(data)[:200]}")
+        if data.get("s") not in ("ok", "no_data"):
             raise RuntimeError(f"{symbol}: CoinDCX candle API error: {str(data)[:200]}")
-        rows.extend(data["data"])
+        if data.get("s") == "no_data":
+            print(f"{symbol}: no historical candles for {pd.to_datetime(cursor, unit='s', utc=True).date()} to {pd.to_datetime(stop, unit='s', utc=True).date()}; skipping unavailable period", flush=True)
+        else:
+            rows.extend(data["data"])
         cursor = stop
         time.sleep(0.08)
     if not rows:
@@ -115,6 +120,10 @@ def fetch_klines(symbol, days, interval="5m"):
     df = df[["open", "high", "low", "close", "volume"]].astype(float)
     df = df[~df.index.duplicated(keep="last")].sort_index()
     df = df[df.index < pd.Timestamp.now(tz="UTC").floor("5min")]
+    coverage_days = (df.index.max() - df.index.min()).total_seconds() / 86400
+    print(f"{symbol}: historical coverage {coverage_days:.1f} days, {len(df)} closed candles", flush=True)
+    if coverage_days < days - 2:
+        raise RuntimeError(f"{symbol}: requested {days} days, CoinDCX only supplied {coverage_days:.1f} days; full-year backtest NOT VALID")
     if len(df) < 100:
         raise RuntimeError(f"{symbol}: insufficient 5m candles: {len(df)}")
     return df
