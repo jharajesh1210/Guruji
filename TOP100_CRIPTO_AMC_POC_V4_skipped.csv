@@ -23,3 +23,6 @@ time,pair,direction,reason,range_pct,sweep_depth_pct
 2026-10-30T22:00:00+00:00,B-LINK_USDT,SHORT,entry_ran_away_0.57pct,,
 2026-10-31T03:30:00+00:00,B-ICP_USDT,LONG,poc_too_far_ahead_0.73R,1.465,0.04
 2026-10-31T07:45:00+00:00,B-ZEC_USDT,SHORT,entry_ran_away_0.34pct,,
+2026-10-31T09:15:00+00:00,B-BNB_USDT,LONG,risk_too_small_0.54,0.752,0.049
+2026-10-31T09:15:00+00:00,B-POL_USDT,LONG,range_too_wide,1.687,0.098
+2026-10-31T09:15:00+00:00,B-DASH_USDT,LONG,sweep_too_deep,1.48,0.314
