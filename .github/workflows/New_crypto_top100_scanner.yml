@@ -43,10 +43,9 @@ jobs:
     timeout-minutes: 10
 
     env:
-      # Legacy scanner continues scanning, but its Telegram notifications are disabled.
-      # CoinDCX paper workflow retains its own BOT_TOKEN / CHAT_ID secrets.
-      TG_TOKEN: ''
-      TG_CHAT_ID: ''
+      # Use the existing verified Telegram secrets for scanner signals.
+      TG_TOKEN: ${{ secrets.BOT_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.CHAT_ID }}
       TF: ${{ github.event.inputs.tf || '15m' }}
       MIN_SCORE: ${{ github.event.inputs.min_score || '4' }}
       TOP: ${{ github.event.inputs.top || '100' }}
