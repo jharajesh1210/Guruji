@@ -1,6 +1,11 @@
 name: ALL SCANNER REPORT
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ALL_SCANNER_REPORT.py'
+      - '.github/workflows/ALL_SCANNER_REPORT.yml'
   schedule:
     - cron: "*/15 * * * *"
 permissions:
