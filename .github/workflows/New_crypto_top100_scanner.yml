@@ -26,7 +26,7 @@ on:
       min_score:
         description: "Minimum strategy score (1-10)"
         required: false
-        default: "4"
+        default: "6"
 
       top:
         description: "Kitne top coins scan karne hain"
@@ -47,7 +47,7 @@ jobs:
       TG_TOKEN: ${{ secrets.BOT_TOKEN }}
       TG_CHAT_ID: ${{ secrets.CHAT_ID }}
       TF: ${{ github.event.inputs.tf || '15m' }}
-      MIN_SCORE: ${{ github.event.inputs.min_score || '4' }}
+      MIN_SCORE: ${{ github.event.inputs.min_score || '6' }}
       TOP: ${{ github.event.inputs.top || '100' }}
 
     steps:
