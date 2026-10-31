@@ -1,0 +1,64 @@
+name: GOLD BOOK Paper Scan
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'scan or backtest'
+        type: choice
+        options: [scan, backtest]
+        default: scan
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gold-book-paper-scan
+  cancel-in-progress: false
+
+jobs:
+  gold-book:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pandas numpy requests
+      - name: Run Gold Book
+        env:
+          MODE: ${{ github.event.inputs.mode || 'scan' }}
+        run: |
+          if [ "$MODE" = "backtest" ]; then
+            python GOLD_BOOK.py --days 365
+          else
+            python GOLD_BOOK.py --scan | tee gold_scan.txt
+          fi
+      - name: Telegram scan result
+        if: ${{ (github.event.inputs.mode || 'scan') == 'scan' }}
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+            echo 'Telegram secrets missing; results remain in Actions logs.'
+            exit 0
+          fi
+          if grep -Eq 'XAUUSDT: (LONG|SHORT) signal|PAXGUSDT: (LONG|SHORT) signal' gold_scan.txt; then
+            curl --fail --silent --show-error --retry 2 \
+              --data-urlencode "chat_id=$TG_CHAT_ID" \
+              --data-urlencode "text@-" \
+              "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" < gold_scan.txt
+          else
+            echo 'No signal; no Telegram alert.'
+          fi
+      - name: Upload backtest CSV
+        if: ${{ github.event.inputs.mode == 'backtest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-book-backtest
+          path: '*_TRADES.csv'
+          if-no-files-found: warn
