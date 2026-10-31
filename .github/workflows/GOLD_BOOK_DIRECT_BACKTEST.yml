@@ -1,4 +1,4 @@
-name: GOLD_BOOK.py Direct 365-Day Backtest
+name: GOLD_BOOK.py Direct Partial History Backtest
 
 on:
   workflow_dispatch:
@@ -20,12 +20,12 @@ jobs:
       - name: Backtest original GOLD_BOOK.py on CoinDCX
         run: |
           set -o pipefail
-          python GOLD_BOOK.py --days 365 --risk-usd 10 2>&1 | tee GOLD_BOOK_DIRECT_BACKTEST.log
+          python GOLD_BOOK.py --days 365 --risk-usd 10 --allow-partial-history 2>&1 | tee GOLD_BOOK_DIRECT_BACKTEST.log
       - name: Save results even if backtest fails
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gold-book-original-365d
+          name: gold-book-partial-history-results
           path: |
             GOLD_BOOK_DIRECT_BACKTEST.log
             GOLD_BOOK_ALL_TRADES.csv
