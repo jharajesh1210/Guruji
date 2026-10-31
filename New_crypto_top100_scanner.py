@@ -552,7 +552,7 @@ def main():
     ap.add_argument("mode", choices=["scan", "paper", "selftest"])
     ap.add_argument("--tf", default="15m", choices=list(TF_SECONDS))
     ap.add_argument("--top", type=int, default=TOP_N)
-    ap.add_argument("--min-score", type=int, default=4, help="kitni strategies align ho (1-10)")
+    ap.add_argument("--min-score", type=int, default=6, help="kitni strategies align ho (1-10)")
     ap.add_argument("--no-htf", action="store_true", help="higher-timeframe filter band")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
