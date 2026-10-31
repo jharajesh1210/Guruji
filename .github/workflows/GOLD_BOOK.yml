@@ -43,16 +43,22 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
-            echo 'ERROR: Telegram secrets missing (TG_TOKEN or TG_CHAT_ID).'
+          TOKEN="${TG_TOKEN:-${TELEGRAM_BOT_TOKEN:-$BOT_TOKEN}}"
+          DEST="${TG_CHAT_ID:-${TELEGRAM_CHAT_ID:-$CHAT_ID}}"
+          if [ -z "$TOKEN" ] || [ -z "$DEST" ]; then
+            echo 'ERROR: No Telegram credentials found. Configure TG_TOKEN and TG_CHAT_ID (or TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID).'
             exit 1
           fi
           if grep -Eq 'XAUUSDT: (LONG|SHORT) signal|PAXGUSDT: (LONG|SHORT) signal' gold_scan.txt; then
             curl --fail --silent --show-error --retry 2 \
-              --data-urlencode "chat_id=$TG_CHAT_ID" \
+              --data-urlencode "chat_id=$DEST" \
               --data-urlencode "text@-" \
-              "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" < gold_scan.txt
+              "https://api.telegram.org/bot${TOKEN}/sendMessage" < gold_scan.txt
           else
             echo 'No signal; no Telegram alert.'
           fi
