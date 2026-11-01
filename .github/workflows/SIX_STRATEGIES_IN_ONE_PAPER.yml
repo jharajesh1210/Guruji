@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: six-independent-paper
@@ -28,38 +28,84 @@ jobs:
           - GOLD_COMBO
           - CRYPTO_TOP100
           - TOP100_AMC_POC
+    env:
+      STRATEGY: ${{ matrix.strategy }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check numpy pandas requests
-      - name: Restore paper state and trade logs
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            *.json
-            *.csv
-          key: six-paper-${{ matrix.strategy }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            six-paper-${{ matrix.strategy }}-
-      - name: Run one independent paper strategy
+      - name: Restore isolated strategy state from dedicated branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="paper-state-${STRATEGY}"
+          case "$STRATEGY" in
+            BTC_SMC_Paper) FILES="BTC_SMC_Paper_state.json BTC_SMC_Paper_trades.csv" ;;
+            BTC_EMA_ADX) FILES="coindcx_futures_paper_state.json coindcx_futures_paper_trades.csv" ;;
+            BTC_SMC_VP) FILES="coindcx_futures_smc_vp_state.json coindcx_futures_smc_vp_trades.csv" ;;
+            GOLD_COMBO) FILES="GOLD_COMBO_PAPER_state.json GOLD_COMBO_PAPER_trades.csv GOLD_COMBO_PAPER_signals.csv" ;;
+            CRYPTO_TOP100) FILES="paper_state.json paper_trades.csv" ;;
+            TOP100_AMC_POC) FILES="TOP100_CRIPTO_AMC_POC_V4_state.json TOP100_CRIPTO_AMC_POC_V4_trades.csv TOP100_CRIPTO_AMC_POC_V4_signals.csv TOP100_CRIPTO_AMC_POC_V4_skipped.csv TOP100_CRIPTO_AMC_POC_V4_universe.csv" ;;
+            *) exit 2 ;;
+          esac
+          echo "STATE_FILES=$FILES" >> "$GITHUB_ENV"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            git fetch --no-tags origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            for file in $FILES; do
+              if git cat-file -e "origin/$BRANCH:$file" 2>/dev/null; then
+                git show "origin/$BRANCH:$file" > "$file"
+              fi
+            done
+            echo "Restored $BRANCH"
+          else
+            echo "No prior state branch; first paper cycle"
+          fi
+      - name: Run original independent paper strategy
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python SIX_STRATEGIES_IN_ONE_PAPER.py --only "${{ matrix.strategy }}"
-      - name: Save paper state and trade logs
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            *.json
-            *.csv
-          key: six-paper-${{ matrix.strategy }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Upload trade logs
+      - name: Persist isolated state after successful cycle
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="paper-state-${STRATEGY}"
+          mkdir -p "$RUNNER_TEMP/paper-state"
+          for file in $STATE_FILES; do
+            if [[ -f "$file" ]]; then cp "$file" "$RUNNER_TEMP/paper-state/$file"; fi
+          done
+          if ! find "$RUNNER_TEMP/paper-state" -maxdepth 1 -type f | grep -q .; then
+            echo "No state files produced"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            git checkout -f -B "$BRANCH" "origin/$BRANCH"
+          else
+            git checkout -f -b "$BRANCH"
+          fi
+          for file in $STATE_FILES; do
+            if [[ -f "$RUNNER_TEMP/paper-state/$file" ]]; then
+              cp "$RUNNER_TEMP/paper-state/$file" "$file"
+              git add -- "$file"
+            fi
+          done
+          if ! git diff --cached --quiet; then
+            git commit -m "Persist paper state for $STRATEGY"
+            git push origin "HEAD:refs/heads/$BRANCH"
+          else
+            echo "Paper state unchanged"
+          fi
+      - name: Upload paper records
         if: always()
         uses: actions/upload-artifact@v4
         with:
