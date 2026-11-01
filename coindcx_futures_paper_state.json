@@ -1,6 +1,14 @@
 {
-  "last_signal_bar": "2026-11-01T18:00:00+00:00",
-  "position": null,
+  "last_signal_bar": "2026-11-01T21:45:00+00:00",
+  "position": {
+    "side": "SELL",
+    "entry": 77840.02888000001,
+    "initial_stop": 78073.54896664001,
+    "stop": 78073.54896664001,
+    "locked_r": 0,
+    "entry_time": "2026-11-01T21:45:00+00:00",
+    "next_bar": "2026-11-01T22:00:00+00:00"
+  },
   "closed": 0,
   "realized_usdt": 0.0
 }
