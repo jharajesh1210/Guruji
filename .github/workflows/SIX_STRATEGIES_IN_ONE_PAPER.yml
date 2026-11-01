@@ -72,7 +72,7 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python SIX_STRATEGIES_IN_ONE_PAPER.py --only "${{ matrix.strategy }}"
+        run: python PAPER_ALERTS_ONLY.py --only "${{ matrix.strategy }}"
       - name: Persist isolated state after successful cycle
         if: success()
         shell: bash
