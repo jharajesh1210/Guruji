@@ -1,0 +1,71 @@
+name: Six Independent Strategies Paper
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: six-independent-paper
+  cancel-in-progress: false
+
+jobs:
+  paper:
+    name: Paper - ${{ matrix.strategy }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        strategy:
+          - BTC_SMC_Paper
+          - BTC_EMA_ADX
+          - BTC_SMC_VP
+          - GOLD_COMBO
+          - CRYPTO_TOP100
+          - TOP100_AMC_POC
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check numpy pandas requests
+      - name: Restore paper state and trade logs
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            *.json
+            *.csv
+          key: six-paper-${{ matrix.strategy }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            six-paper-${{ matrix.strategy }}-
+      - name: Run one independent paper strategy
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python SIX_STRATEGIES_IN_ONE_PAPER.py --only "${{ matrix.strategy }}"
+      - name: Save paper state and trade logs
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            *.json
+            *.csv
+          key: six-paper-${{ matrix.strategy }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload trade logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-${{ matrix.strategy }}-${{ github.run_id }}
+          path: |
+            *.json
+            *.csv
+          if-no-files-found: ignore
+          retention-days: 30
