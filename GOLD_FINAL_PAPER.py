@@ -145,6 +145,37 @@ def manage(s,d,now):
   finish(s,p,price,"STOP_LOCK",now);return
  p["bars"]+=1
  if p["bars"]>=30 and p["level"]==0:finish(s,p,price,"STALL_EXIT",now)
+
+def source_news_window(now):
+ # Faithful to uploaded GOLD_FINAL_STRATEGY(1).py: approximate IST slots,
+ # NOT an actual economic calendar. These are additional blocks.
+ local=now.astimezone(IST); minute=local.hour*60+local.minute
+ for slot in (18*60+45,19*60+15,23*60+45,30):
+  if min(abs(minute-slot),1440-abs(minute-slot))<=30:return True
+ return False
+def setup_a_source_proxy(d,b,h):
+ # Uploaded PY explicitly defines this as a rolling-quantile PROXY, not true VP.
+ x=d.iloc[-2];confirm=d.iloc[-1]
+ if len(d)<290:return None
+ if abs(x.close-x.open)/max(x.high-x.low,1e-12)<.6:return None
+ if x.volume<=1.5*float(d.volume.iloc[-22:-2].mean()):return None
+ vah=float(d.high.rolling(288).quantile(.7).iloc[-2])
+ val=float(d.low.rolling(288).quantile(.3).iloc[-2])
+ direction=1 if x.close>vah and confirm.high>x.high else -1 if x.close<val and confirm.low<x.low else 0
+ if not direction or direction*(x.close-x.open)<=0:return None
+ if direction*(x.close-ema(d.close,200).iloc[-2])<=0:return None
+ if direction*(b.close.iloc[-1]-ema(b.close,200).iloc[-1])<=0:return None
+ if direction*(b.close.iloc[-1]-b.open.iloc[-1])<=0:return None
+ if direction*(ema(h.close,50).iloc[-1]-ema(h.close,200).iloc[-1])<=0:return None
+ if direction*(x.close-vwap(d).iloc[-2])<=0 or adx(d).iloc[-2]<=20:return None
+ entry=float(x.high if direction>0 else x.low)*(1+direction*SLIPPAGE)
+ stop_candle=float(x.low if direction>0 else x.high)
+ stop_atr=entry-direction*1.5*float(atr(d).iloc[-2])
+ stop=max(stop_candle,stop_atr) if direction>0 else min(stop_candle,stop_atr)
+ risk=abs(entry-stop)
+ if risk<=0 or (2*FEE+2*SLIPPAGE)*entry>.15*risk:return None
+ return {"setup":"A_SOURCE_PROXY","side":"LONG" if direction>0 else "SHORT","direction":direction,"entry":entry,"stop":stop,"risk":risk,"bar":str(confirm.ts),"start":str(confirm.ts),"bars":0,"level":0}
+
 def main():
  now=dt.datetime.now(UTC);local=now.astimezone(IST)
  s=load()
@@ -170,10 +201,27 @@ def main():
   print("NO ENTRY: risk guard");save(s);return
  if s.get("last_exit_ts") and (now-dt.datetime.fromisoformat(s["last_exit_ts"])).total_seconds()<25*60:
   print("NO ENTRY: cooldown");save(s);return
- # Both symbols required for reliable basis check; exact threshold unspecified in source.
- if set(target)!={"XAU","PAXG"}:print("NO ENTRY: both GOLD futures instruments unavailable for basis verification");save(s);return
- print("PAPER ENGINE ACTIVE: monitoring entries and exits. Original basis-gap/funding limits and actual trade-volume profile are not specified; new entries fail closed.")
- # Fail closed: do not fabricate missing thresholds or pretend candle quantiles are volume profile.
+ # The uploaded Python does not define a numerical funding/basis threshold.
+ # Do not silently invent one. Source-only mode can simulate Setup A proxy/B,
+ # but this is not equivalent to the complete v2 spec.
+ if set(target)!={"XAU","PAXG"}:
+  print("NO ENTRY: XAU and PAXG futures must both be available");save(s);return
+ if source_news_window(now):
+  print("NO ENTRY: uploaded Python approximate high-impact news window");save(s);return
+ # Full-v2 compliance requires a real calendar; without it new entries remain blocked.
+ if not news_verified(now):
+  print("NO ENTRY: actual economic calendar unavailable; original full-v2 safety rule enforced");save(s);return
+ for symbol in ("XAU","PAXG"):
+  pair=target[symbol]
+  try:
+   d=candles(pair,"5m",5);b=candles(pair,"15m",12);h=candles(pair,"1h",40)
+   bar=str(d.ts.iloc[-1])
+   if s.get("last_entry_bar")==bar:continue
+   sig=setup_b(d,b,h) or setup_a_source_proxy(d,b,h)
+   if not sig:continue
+   # Full-v2 basis/funding validation not yet provided. Never bypass these.
+   print("CANDIDATE",symbol,sig["setup"],sig["side"],"BLOCKED: funding/basis validation absent")
+  except Exception as e:print("NO ENTRY",symbol,repr(e))
  save(s)
 if __name__=="__main__":
  try:main()
