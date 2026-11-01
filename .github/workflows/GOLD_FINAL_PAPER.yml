@@ -1,0 +1,27 @@
+name: GOLD FINAL Paper Data Monitor
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gold-final-paper
+  cancel-in-progress: false
+jobs:
+  gold-paper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install pandas requests
+      - run: python -m py_compile GOLD_FINAL_PAPER.py
+      - name: Check CoinDCX Gold futures market data
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          GOLD_SEND_STATUS: "0"
+        run: python GOLD_FINAL_PAPER.py
