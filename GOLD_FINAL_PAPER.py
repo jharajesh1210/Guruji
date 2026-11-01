@@ -6,6 +6,9 @@ IST=ZoneInfo("Asia/Kolkata"); UTC=dt.timezone.utc
 BASE="https://api.coindcx.com/exchange/v1/derivatives/futures/data"
 STATE="GOLD_FINAL_PAPER_STATE.json"; HISTORY="GOLD_FINAL_PAPER_TRADES.csv"
 CAPITAL=float(os.getenv("GOLD_CAPITAL","1000"))
+POSITION_CAP=float(os.getenv("GOLD_POSITION_USDT","500"))
+REQUESTED_LEVERAGE=float(os.getenv("GOLD_REQUESTED_LEVERAGE","30"))
+MAX_STRATEGY_LEVERAGE=5.0
 FEE=float(os.getenv("GOLD_FEE_RATE","0.0005"))
 SLIPPAGE=float(os.getenv("GOLD_SLIPPAGE_RATE","0.0002"))
 def get(url,params=None):
@@ -179,6 +182,7 @@ def setup_a_source_proxy(d,b,h):
 def main():
  now=dt.datetime.now(UTC);local=now.astimezone(IST)
  s=load()
+ print(f"PAPER CONFIG: 500 USDT notional cap, requested {REQUESTED_LEVERAGE:g}x, original strategy maximum 5x, no real orders")
  day=local.date().isoformat();week=str(local.isocalendar().year)+"-"+str(local.isocalendar().week)
  if s["date"]!=day:s["date"]=day;s["trades_today"]=0;s["losses_today"]=0;s["day_equity"]=s["equity"]
  if s["week"]!=week:s["week"]=week;s["week_equity"]=s["equity"]
