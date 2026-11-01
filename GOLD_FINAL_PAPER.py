@@ -179,6 +179,24 @@ def setup_a_source_proxy(d,b,h):
  if risk<=0 or (2*FEE+2*SLIPPAGE)*entry>.15*risk:return None
  return {"setup":"A_SOURCE_PROXY","side":"LONG" if direction>0 else "SHORT","direction":direction,"entry":entry,"stop":stop,"risk":risk,"bar":str(confirm.ts),"start":str(confirm.ts),"bars":0,"level":0}
 
+def validated_market_filters(symbol,now):
+ """Only independently verified funding and basis data may authorize entries."""
+ try:
+  with open("GOLD_MARKET_FILTERS.json") as f:x=json.load(f)
+  checked=dt.datetime.fromisoformat(x["checked_at"].replace("Z","+00:00"))
+  if checked.tzinfo is None or abs((now-checked).total_seconds())>300:return False
+  if x.get("basis_verified") is not True or x.get("funding_verified") is not True:return False
+  if x.get("basis_ok") is not True:return False
+  if x.get("funding_ok",{}).get(symbol) is not True:return False
+  return True
+ except (OSError,ValueError,KeyError,TypeError,AttributeError):return False
+
+def paper_size(entry,risk,equity,sess):
+ """500 USDT max notional; 1% equity risk; original strategy max 5x exposure."""
+ if min(entry,risk,equity)<=0:return 0
+ size=min(POSITION_CAP/entry, .01*equity/risk, equity*MAX_STRATEGY_LEVERAGE/entry)
+ return max(0,size*(.5 if sess=="LONDON" else 1))
+
 def main():
  now=dt.datetime.now(UTC);local=now.astimezone(IST)
  s=load()
@@ -223,8 +241,18 @@ def main():
    if s.get("last_entry_bar")==bar:continue
    sig=setup_b(d,b,h) or setup_a_source_proxy(d,b,h)
    if not sig:continue
-   # Full-v2 basis/funding validation not yet provided. Never bypass these.
-   print("CANDIDATE",symbol,sig["setup"],sig["side"],"BLOCKED: funding/basis validation absent")
+   if sig["setup"]=="A_SOURCE_PROXY":
+    print("NO ENTRY: Setup A proxy is not true session Volume Profile");continue
+   if not validated_market_filters(symbol,now):
+    print("CANDIDATE",symbol,sig["setup"],"BLOCKED: verified basis/funding snapshot missing");continue
+   qty=paper_size(sig["entry"],sig["risk"],s["equity"],sess)
+   if qty<=0:continue
+   sig.update({"pair":pair,"qty":qty,"session":sess})
+   s["position"]=sig
+   s["trades_today"]+=1
+   s["last_entry_bar"]=bar
+   notify("GOLD PAPER ENTRY "+symbol+" "+sig["side"]+" SETUP "+sig["setup"]+" | Entry "+str(round(sig["entry"],4))+" | SL "+str(round(sig["stop"],4))+" | Notional "+str(round(qty*sig["entry"],2))+" USDT | PAPER ONLY, NO REAL ORDER")
+   break
   except Exception as e:print("NO ENTRY",symbol,repr(e))
  save(s)
 if __name__=="__main__":
