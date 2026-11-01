@@ -33,6 +33,8 @@ jobs:
           TG_TOKEN: ${{ secrets.BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.CHAT_ID }}
           GOLD_CAPITAL: "1000"
+          GOLD_POSITION_USDT: "500"
+          GOLD_REQUESTED_LEVERAGE: "30"
         run: python GOLD_FINAL_PAPER.py
       - name: Save paper position and trade history
         if: always()
