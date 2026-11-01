@@ -1,27 +1,34 @@
-name: GOLD FINAL STRATEGY v2 - SAFE VALIDATION
+name: GOLD FINAL STRATEGY - Syntax Validation
 on:
-  schedule:
-    - cron: "*/5 * * * *"
+  push:
+    paths:
+      - 'GOLD_FINAL_STRATEGY.py'
+      - '.github/workflows/GOLD_FINAL_STRATEGY.yml'
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
 permissions:
   contents: read
 concurrency:
-  group: gold-final-strategy-v2
+  group: gold-final-strategy-validation
   cancel-in-progress: false
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: python -m pip install pandas numpy requests
-      - name: Syntax check
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check numpy pandas pytz ta
+      - name: Validate uploaded Python without changing strategy
         run: python -m py_compile GOLD_FINAL_STRATEGY.py
-      - name: Run fail-closed paper validation
-        env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python GOLD_FINAL_STRATEGY.py
+      - name: Explain execution status
+        run: |
+          echo "Python syntax validation complete."
+          echo "Live scanner execution is NOT enabled: uploaded Python has candle-fetch placeholders and an infinite loop."
+          echo "No live orders or Telegram trade confirmations are sent by this workflow."
