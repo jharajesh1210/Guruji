@@ -30,8 +30,8 @@ jobs:
         run: python -m py_compile GOLD_FINAL_PAPER.py
       - name: CoinDCX paper engine
         env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.CHAT_ID }}
           GOLD_CAPITAL: "1000"
         run: python GOLD_FINAL_PAPER.py
       - name: Save paper position and trade history
@@ -47,8 +47,8 @@ jobs:
       - name: Telegram test on manual dispatch
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_status }}
         env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python - <<'PY'
           import os,requests
