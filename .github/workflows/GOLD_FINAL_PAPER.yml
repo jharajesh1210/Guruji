@@ -1,27 +1,60 @@
-name: GOLD FINAL Paper Data Monitor
+name: GOLD FINAL Paper Trading
 on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      send_status:
+        description: "Send Telegram status test (not a trade)"
+        type: boolean
+        default: true
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: gold-final-paper
   cancel-in-progress: false
 jobs:
   gold-paper:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install pandas requests
-      - run: python -m py_compile GOLD_FINAL_PAPER.py
-      - name: Check CoinDCX Gold futures market data
+      - name: Install dependencies
+        run: python -m pip install pandas numpy requests
+      - name: Compile check
+        run: python -m py_compile GOLD_FINAL_PAPER.py
+      - name: CoinDCX paper engine
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          GOLD_SEND_STATUS: "0"
+          GOLD_CAPITAL: "1000"
         run: python GOLD_FINAL_PAPER.py
+      - name: Save paper position and trade history
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add GOLD_FINAL_PAPER_STATE.json GOLD_FINAL_PAPER_TRADES.csv 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Update GOLD paper state [skip ci]"
+            git push
+          fi
+      - name: Telegram test on manual dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_status }}
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import os,requests
+          token=os.getenv("TG_TOKEN"); chat=os.getenv("TG_CHAT_ID")
+          if not token or not chat: raise SystemExit("TG_TOKEN or TG_CHAT_ID missing")
+          r=requests.post(f"https://api.telegram.org/bot{token}/sendMessage",data={"chat_id":chat,"text":"GOLD FINAL PAPER: GitHub manual test. This is NOT a trade confirmation."},timeout=20)
+          r.raise_for_status()
+          print("Telegram test delivered to API")
+          PY
