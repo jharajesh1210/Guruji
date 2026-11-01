@@ -1,0 +1,2 @@
+symbol,side,entry,exit,qty,pnl,reason,entry_time,exit_time,equity
+PARTIUSDT,LONG,0.04874,0.047935445068765015,41034.05826836274,-36.98,SL,2026-11-01 12:45:00+00:00,2026-11-01 13:00:00+00:00,9963.02
