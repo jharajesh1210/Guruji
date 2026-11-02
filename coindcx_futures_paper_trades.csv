@@ -1,0 +1,2 @@
+pair,side,entry_time,exit_time,entry,exit,initial_stop,reason,net_usdt,realized_total_usdt
+B-BTC_USDT,SELL,2026-11-01T21:45:00+00:00,2026-11-01T23:00:00+00:00,77840.02888000001,78089.16367643334,78073.54896664001,STOP_OR_TRAIL,-6.3009,-6.3009
