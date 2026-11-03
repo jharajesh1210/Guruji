@@ -1,0 +1,70 @@
+name: NIFTY FUT COMBO Paper
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'paper or telegram-test'
+        type: choice
+        options:
+          - paper
+          - telegram-test
+        default: paper
+  schedule:
+    - cron: '*/5 4-10 * * 1-5' # UTC; Python handles IST market hours
+permissions:
+  contents: write
+concurrency:
+  group: nifty-fut-combo-paper
+  cancel-in-progress: false
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+      ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+      ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+      ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+      TG_TOKEN: ${{ secrets.TG_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install smartapi-python pyotp requests pandas numpy logzero websocket-client pycryptodome
+      - name: Verify credentials
+        shell: bash
+        run: |
+          if [ "${{ github.event.inputs.mode }}" != "telegram-test" ]; then
+            test -n "$ANGEL_API_KEY" && test -n "$ANGEL_CLIENT_CODE" && test -n "$ANGEL_PIN" && test -n "$ANGEL_TOTP_SECRET" || { echo 'Missing Angel One secrets'; exit 1; }
+          fi
+          test -n "${TG_TOKEN:-${BOT_TOKEN:-}}" && test -n "${TG_CHAT_ID:-${CHAT_ID:-}}" || { echo 'Missing Telegram secrets'; exit 1; }
+      - name: Run paper scanner or Telegram test
+        shell: bash
+        run: |
+          MODE='${{ github.event.inputs.mode }}'
+          if [ "$MODE" = 'telegram-test' ]; then
+            python NIFTY_FUT_COMBO.py telegram-test
+          else
+            python NIFTY_FUT_COMBO.py paper
+          fi
+      - name: Save paper state and trade history
+        if: always()
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for f in NIFTY_FUT_PAPER_state.json NIFTY_FUT_PAPER_trades.csv NIFTY_FUT_PAPER_signals.csv; do
+            if [ -f "$f" ]; then git add -f "$f"; fi
+          done
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update NIFTY FUT paper state [skip ci]'
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
+          fi
