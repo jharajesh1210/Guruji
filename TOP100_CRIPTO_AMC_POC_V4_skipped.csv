@@ -1,0 +1,4 @@
+time,pair,direction,reason,range_pct,sweep_depth_pct
+2026-11-03T01:00:00+00:00,B-DOGE_USDT,SHORT,risk_too_small_0.43,1.146,0.175
+2026-11-03T01:00:00+00:00,B-LINK_USDT,SHORT,sweep_too_deep,1.333,0.359
+2026-11-03T01:00:00+00:00,B-INJ_USDT,SHORT,range_too_wide,1.952,0.228
