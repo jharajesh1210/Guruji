@@ -150,10 +150,10 @@ jobs:
                   "entry_gate":"FAIL_CLOSED_IF_NEWS_OR_BASIS_UNVERIFIED"}
           Path("GOLD_FINAL_DIAGNOSTICS.json").write_text(json.dumps(report,indent=2))
           with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as out:
-              out.write("### GOLD FINAL paper safety diagnostics\\n\\n")
+              out.write("### GOLD FINAL paper safety diagnostics\n\n")
               for name in ("news","funding_observations","verified_market_filters"):
-                  out.write("- "+name+": "+report[name]["status"]+"\\n")
-              out.write("\\nNo live orders. No fabricated verification.\\n")
+                  out.write("- "+name+": "+report[name]["status"]+"\n")
+              out.write("\nNo live orders. No fabricated verification.\n")
           print(json.dumps(report,indent=2))
           PY
       - name: Upload gold diagnostics
