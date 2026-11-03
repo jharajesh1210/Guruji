@@ -128,6 +128,46 @@ jobs:
           GOLD_POSITION_USDT: "500"
           GOLD_REQUESTED_LEVERAGE: "30"
         run: python GOLD_FINAL_PAPER.py
+      - name: Publish gold paper diagnostics
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import datetime as dt, json
+          from pathlib import Path
+          now=dt.datetime.now(dt.timezone.utc).isoformat()
+          def check(path):
+              p=Path(path)
+              if not p.exists(): return {"status":"MISSING"}
+              try:
+                  obj=json.loads(p.read_text(encoding="utf-8"))
+                  return {"status":"PRESENT","source":obj.get("source","unspecified"),"checked_at":obj.get("checked_at"),"verified_until":obj.get("verified_until")}
+              except (ValueError,OSError) as e:
+                  return {"status":"INVALID","reason":str(e)}
+          report={"timestamp_utc":now,"mode":"PAPER_ONLY","news":check("GOLD_NEWS_WINDOWS.json"),
+                  "funding_observations":check("GOLD_FUNDING_OBSERVATIONS.json"),
+                  "verified_market_filters":check("GOLD_MARKET_FILTERS.json"),
+                  "entry_gate":"FAIL_CLOSED_IF_NEWS_OR_BASIS_UNVERIFIED"}
+          Path("GOLD_FINAL_DIAGNOSTICS.json").write_text(json.dumps(report,indent=2))
+          with open("GITHUB_STEP_SUMMARY","a") as out:
+              out.write("### GOLD FINAL paper safety diagnostics\\n\\n")
+              for name in ("news","funding_observations","verified_market_filters"):
+                  out.write("- "+name+": "+report[name]["status"]+"\\n")
+              out.write("\\nNo live orders. No fabricated verification.\\n")
+          print(json.dumps(report,indent=2))
+          PY
+      - name: Upload gold diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-final-diagnostics-${{ github.run_id }}
+          path: |
+            GOLD_FINAL_DIAGNOSTICS.json
+            GOLD_FUNDING_OBSERVATIONS.json
+            GOLD_FINAL_PAPER_STATE.json
+            GOLD_FINAL_PAPER_TRADES.csv
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Save paper position and trade history
         if: always()
         run: |
