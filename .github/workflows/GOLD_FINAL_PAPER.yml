@@ -79,15 +79,15 @@ jobs:
                   last=float(quote["ls"])
                   if not all(map(__import__("math").isfinite,(rate,mark,last))) or mark<=0 or last<=0:
                       raise ValueError(symbol+" invalid price/funding")
-                  timestamp=int(quote.get("bmST",0))
-                  if timestamp<=0 or abs(now.timestamp()*1000-timestamp)>300000:
-                      raise ValueError(symbol+" stale quote")
-                  result[symbol]={"pair":pair,"funding_rate":rate,"mark_price":mark,"last_price":last}
+                  # bmST is not documented here as a quote update timestamp. Do not use it to certify freshness.
+                  if "fr" not in quote or "mp" not in quote or "ls" not in quote:
+                      raise ValueError(symbol+" required funding/mark/last fields absent")
+                  result[symbol]={"pair":pair,"funding_rate":rate,"mark_price":mark,"last_price":last,"fetched_at":now.isoformat()}
               # Mark-vs-last is not verified index basis. Never set basis_verified to true.
               Path("GOLD_FUNDING_OBSERVATIONS.json").write_text(json.dumps({
                   "checked_at":now.isoformat(),"source":"CoinDCX public realtime futures",
                   "funding_observations":result,"basis_verified":False},indent=2))
-              print("FUNDING OBSERVED: XAU and PAXG; INDEX BASIS NOT VERIFIED")
+              print("FUNDING OBSERVED: XAU and PAXG; quote freshness and INDEX BASIS NOT VERIFIED")
           except Exception as e:
               print("::warning::FUNDING NOT VERIFIED: "+str(e))
           PY
