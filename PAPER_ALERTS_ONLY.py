@@ -178,7 +178,11 @@ def _run_one_with_notification_audit(name):
     _SENT_BY_STRATEGY[name] = []
     succeeded = _original_run_one(name)
     if succeeded:
-        _report_new_events(name, before_rows, before_positions)
+        try:
+            _report_new_events(name, before_rows, before_positions)
+        except Exception as exc:
+            # A Telegram outage must never block persistence of completed paper trades.
+            print("PAPER NOTIFICATION ERROR | scanner=" + name + " | " + str(exc), flush=True)
     return succeeded
 
 combined.run_one = _run_one_with_notification_audit
