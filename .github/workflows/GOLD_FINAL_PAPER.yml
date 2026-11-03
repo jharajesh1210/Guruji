@@ -28,6 +28,46 @@ jobs:
         run: python -m pip install pandas numpy requests
       - name: Compile check
         run: python -m py_compile GOLD_FINAL_PAPER.py
+      - name: Validate mandatory live safety data
+        run: |
+          python - <<'PY'
+          import datetime as dt
+          import json
+          from pathlib import Path
+          now = dt.datetime.now(dt.timezone.utc)
+          problems = []
+          news_path = Path("GOLD_NEWS_WINDOWS.json")
+          filters_path = Path("GOLD_MARKET_FILTERS.json")
+          if not news_path.is_file():
+              problems.append("GOLD_NEWS_WINDOWS.json missing: verified economic calendar required")
+          else:
+              try:
+                  data = json.loads(news_path.read_text(encoding="utf-8"))
+                  until = dt.datetime.fromisoformat(data["verified_until"].replace("Z", "+00:00"))
+                  if until.tzinfo is None or until < now or not isinstance(data["events"], list):
+                      problems.append("News calendar expired or malformed")
+              except (ValueError, KeyError, TypeError):
+                  problems.append("News calendar invalid")
+          if not filters_path.is_file():
+              problems.append("GOLD_MARKET_FILTERS.json missing: verified funding and basis required")
+          else:
+              try:
+                  data = json.loads(filters_path.read_text(encoding="utf-8"))
+                  checked = dt.datetime.fromisoformat(data["checked_at"].replace("Z", "+00:00"))
+                  if checked.tzinfo is None or abs((now - checked).total_seconds()) > 300:
+                      problems.append("Funding/basis snapshot stale (older than 5 minutes)")
+                  if data.get("basis_verified") is not True or data.get("funding_verified") is not True or data.get("basis_ok") is not True:
+                      problems.append("Funding/basis verification failed")
+                  if not all(data.get("funding_ok", {}).get(sym) is True for sym in ("XAU", "PAXG")):
+                      problems.append("Funding verification missing for XAU or PAXG")
+              except (ValueError, KeyError, TypeError, AttributeError):
+                  problems.append("Funding/basis snapshot invalid")
+          for problem in problems:
+              print("::error::GOLD PAPER SAFETY BLOCK: " + problem)
+          if problems:
+              raise SystemExit("Gold paper entries disabled until genuine verified data is supplied")
+          print("GOLD PAPER SAFETY DATA VALIDATED")
+          PY
       - name: CoinDCX paper engine
         env:
           TG_TOKEN: ${{ secrets.BOT_TOKEN }}
