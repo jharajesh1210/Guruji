@@ -133,7 +133,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import datetime as dt, json
+          import datetime as dt, json, os
           from pathlib import Path
           now=dt.datetime.now(dt.timezone.utc).isoformat()
           def check(path):
@@ -149,7 +149,7 @@ jobs:
                   "verified_market_filters":check("GOLD_MARKET_FILTERS.json"),
                   "entry_gate":"FAIL_CLOSED_IF_NEWS_OR_BASIS_UNVERIFIED"}
           Path("GOLD_FINAL_DIAGNOSTICS.json").write_text(json.dumps(report,indent=2))
-          with open("GITHUB_STEP_SUMMARY","a") as out:
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as out:
               out.write("### GOLD FINAL paper safety diagnostics\\n\\n")
               for name in ("news","funding_observations","verified_market_filters"):
                   out.write("- "+name+": "+report[name]["status"]+"\\n")
