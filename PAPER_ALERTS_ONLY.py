@@ -142,13 +142,13 @@ def _report_new_events(scanner, old_rows, old_positions):
     for row in new_rows[len(old_rows):]:
         symbol = row.get("symbol") or row.get("pair") or row.get("coin") or "UNKNOWN"
         side = row.get("side", "")
-        pnl = row.get("pnl", row.get("net_usdt", row.get("net_pnl_usdt", "")))
+        pnl = row.get("pnl") or row.get("net_usdt") or row.get("net_pnl_usdt") or ""
         reason = row.get("reason", "")
         events.append("PAPER EXIT | " + str(symbol) + " | " + str(side) +
                       " | P&L: " + str(pnl) + " USDT | Reason: " + str(reason))
     positions = _read_positions(state_path)
     for symbol, position in positions.items():
-        if symbol not in old_positions or old_positions[symbol] != position and not old_positions.get(symbol):
+        if symbol not in old_positions:
             side = str(position.get("side", position.get("direction", ""))).upper()
             entry = position.get("entry", position.get("entry_price", ""))
             events.append("PAPER " + ("BUY" if side in ("LONG", "BUY") else "SELL" if side in ("SHORT", "SELL") else "ENTRY") +
