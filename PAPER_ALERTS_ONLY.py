@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Paper-only Telegram attribution adapter. Original strategies are unchanged."""
 import functools
+
+_SENT_BY_STRATEGY = {}
 import SIX_STRATEGIES_IN_ONE_PAPER as combined
 
 _original_loader = combined.load_original
@@ -27,7 +29,20 @@ class _TelegramRequestsProxy:
             # Telegram text may also be passed as a keyword argument.
             if isinstance(kwargs.get("text"), str):
                 kwargs["text"] = self._prefix(kwargs["text"])
-        return getattr(self._original, method)(url, *args, **kwargs)
+        response = getattr(self._original, method)(url, *args, **kwargs)
+        if isinstance(url, str) and "api.telegram.org/" in url and "/sendMessage" in url:
+            payload = kwargs.get("data") or kwargs.get("json") or kwargs.get("params") or {}
+            if isinstance(payload, dict) and isinstance(payload.get("text"), str):
+                try:
+                    result = response.json()
+                    if response.status_code == 200 and result.get("ok"):
+                        _SENT_BY_STRATEGY.setdefault(self._scanner, []).append(payload["text"])
+                        print("TELEGRAM ORIGINAL DELIVERY OK | scanner=" + self._scanner, flush=True)
+                    else:
+                        print("TELEGRAM ORIGINAL DELIVERY FAILED | scanner=" + self._scanner + " | HTTP=" + str(response.status_code), flush=True)
+                except (ValueError, AttributeError):
+                    print("TELEGRAM ORIGINAL DELIVERY UNVERIFIED | scanner=" + self._scanner, flush=True)
+        return response
 
     def _prefix(self, message):
         tag = "[SCANNER: " + self._scanner + "]"
@@ -138,8 +153,20 @@ def _report_new_events(scanner, old_rows, old_positions):
             entry = position.get("entry", position.get("entry_price", ""))
             events.append("PAPER " + ("BUY" if side in ("LONG", "BUY") else "SELL" if side in ("SHORT", "SELL") else "ENTRY") +
                           " | " + str(symbol) + " | Entry: " + str(entry))
+    original_messages = _SENT_BY_STRATEGY.get(scanner, [])
     for event in events:
-        _telegram_event(scanner, event)
+        parts = event.split(" | ")
+        symbol = parts[1] if len(parts) > 1 else ""
+        is_exit = event.startswith("PAPER EXIT")
+        matching = [m.upper() for m in original_messages if symbol and symbol in m]
+        already_sent = any(
+            any(word in m for word in (("EXIT", "CLOSED", "STOP LOSS", "TAKE PROFIT") if is_exit else ("BUY", "SELL", "ENTRY", "OPENED")))
+            for m in matching
+        )
+        if already_sent:
+            print("TELEGRAM DUPLICATE AVOIDED | scanner=" + scanner + " | symbol=" + symbol, flush=True)
+        else:
+            _telegram_event(scanner, event)
     print("PAPER NOTIFICATION AUDIT | scanner=" + scanner + " | new_events=" + str(len(events)), flush=True)
 
 _original_run_one = combined.run_one
@@ -148,6 +175,7 @@ def _run_one_with_notification_audit(name):
     csv_path, state_path = _RECORDS[name]
     before_rows = _read_rows(csv_path)
     before_positions = _read_positions(state_path)
+    _SENT_BY_STRATEGY[name] = []
     succeeded = _original_run_one(name)
     if succeeded:
         _report_new_events(name, before_rows, before_positions)
