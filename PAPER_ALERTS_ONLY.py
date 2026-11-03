@@ -62,5 +62,98 @@ def load_original_with_scanner_name(name):
 
 combined.load_original = load_original_with_scanner_name
 
+
+# Notification-only audit: compare paper records before and after each successful cycle.
+# No strategy code, thresholds, position sizing, or trade-state files are modified.
+import csv
+import json
+import os
+from pathlib import Path
+import requests as _notification_requests
+
+_RECORDS = {
+    "BTC_SMC_Paper": ("BTC_SMC_Paper_trades.csv", "BTC_SMC_Paper_state.json"),
+    "BTC_EMA_ADX": ("coindcx_futures_paper_trades.csv", "coindcx_futures_paper_state.json"),
+    "BTC_SMC_VP": ("coindcx_futures_smc_vp_trades.csv", "coindcx_futures_smc_vp_state.json"),
+    "GOLD_COMBO": ("GOLD_COMBO_PAPER_trades.csv", "GOLD_COMBO_PAPER_state.json"),
+    "CRYPTO_TOP100": ("paper_trades.csv", "paper_state.json"),
+    "TOP100_AMC_POC": ("TOP100_CRIPTO_AMC_POC_V4_trades.csv", "TOP100_CRIPTO_AMC_POC_V4_state.json"),
+}
+
+def _read_rows(path):
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as handle:
+            return list(csv.DictReader(handle))
+    except FileNotFoundError:
+        return []
+
+def _read_positions(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            state = json.load(handle)
+    except (FileNotFoundError, ValueError):
+        return {}
+    positions = state.get("positions", state.get("open_trades", []))
+    if isinstance(positions, dict):
+        return positions
+    if isinstance(positions, list):
+        return {str(p.get("symbol", p.get("pair", i))): p for i, p in enumerate(positions) if isinstance(p, dict)}
+    return {}
+
+def _telegram_event(scanner, event):
+    token = os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN")
+    chat_id = os.getenv("TG_CHAT_ID") or os.getenv("CHAT_ID")
+    if not token or not chat_id:
+        raise RuntimeError("TELEGRAM DELIVERY ERROR: token or chat ID missing (secret value not logged)")
+    message = "[SCANNER: " + scanner + "]\n" + event
+    response = _notification_requests.post(
+        "https://api.telegram.org/bot" + token + "/sendMessage",
+        data={"chat_id": chat_id, "text": message}, timeout=20,
+    )
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if response.status_code != 200 or not payload.get("ok"):
+        raise RuntimeError("TELEGRAM DELIVERY ERROR: HTTP " + str(response.status_code) + "; Telegram ok=" + str(payload.get("ok")))
+    print("TELEGRAM DELIVERY OK | scanner=" + scanner, flush=True)
+
+def _report_new_events(scanner, old_rows, old_positions):
+    csv_path, state_path = _RECORDS[scanner]
+    new_rows = _read_rows(csv_path)
+    if len(new_rows) < len(old_rows) or new_rows[:len(old_rows)] != old_rows:
+        raise RuntimeError("Paper trade history changed unexpectedly; notification audit stopped")
+    events = []
+    for row in new_rows[len(old_rows):]:
+        symbol = row.get("symbol") or row.get("pair") or row.get("coin") or "UNKNOWN"
+        side = row.get("side", "")
+        pnl = row.get("pnl", row.get("net_usdt", row.get("net_pnl_usdt", "")))
+        reason = row.get("reason", "")
+        events.append("PAPER EXIT | " + str(symbol) + " | " + str(side) +
+                      " | P&L: " + str(pnl) + " USDT | Reason: " + str(reason))
+    positions = _read_positions(state_path)
+    for symbol, position in positions.items():
+        if symbol not in old_positions or old_positions[symbol] != position and not old_positions.get(symbol):
+            side = str(position.get("side", position.get("direction", ""))).upper()
+            entry = position.get("entry", position.get("entry_price", ""))
+            events.append("PAPER " + ("BUY" if side in ("LONG", "BUY") else "SELL" if side in ("SHORT", "SELL") else "ENTRY") +
+                          " | " + str(symbol) + " | Entry: " + str(entry))
+    for event in events:
+        _telegram_event(scanner, event)
+    print("PAPER NOTIFICATION AUDIT | scanner=" + scanner + " | new_events=" + str(len(events)), flush=True)
+
+_original_run_one = combined.run_one
+
+def _run_one_with_notification_audit(name):
+    csv_path, state_path = _RECORDS[name]
+    before_rows = _read_rows(csv_path)
+    before_positions = _read_positions(state_path)
+    succeeded = _original_run_one(name)
+    if succeeded:
+        _report_new_events(name, before_rows, before_positions)
+    return succeeded
+
+combined.run_one = _run_one_with_notification_audit
+
 if __name__ == "__main__":
     combined.main()
