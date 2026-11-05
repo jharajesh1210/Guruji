@@ -882,6 +882,7 @@ def run_angel_one_paper():
             print("This open position was already managed on the latest completed candle.")
             return
         state["last_managed_candle"] = candle_time
+        save_paper_state(state)
         candle = {k: float(row[k]) for k in ("open", "high", "low", "close")}
         result = strategy.process_step_lock_trailing_sl(candle, pos, bb_mid=float(row["bb_mid"]))
         if now.time() >= cfg.square_off_time:
