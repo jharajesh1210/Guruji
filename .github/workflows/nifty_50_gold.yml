@@ -23,7 +23,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install smartapi-python pyotp requests pandas numpy
+        run: |
+          python -m pip install --upgrade pip
+          pip install smartapi-python pyotp logzero requests pandas numpy
       - name: Run Angel One NIFTY 50 GOLD paper scanner
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
