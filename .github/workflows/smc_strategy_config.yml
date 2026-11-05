@@ -21,7 +21,7 @@ jobs:
       # Keep existing saved secret names; values remain in GitHub Secrets.
       ANGEL_API_KEY: ${{ secrets.AKPVIim8 }}
       ANGEL_CLIENT_CODE: ${{ secrets.AACN705705 }}
-      ANGEL_PIN: ${{ secrets.1210 }}
+      ANGEL_PIN: ${{ secrets['1210'] }}
       ANGEL_TOTP_SECRET: ${{ secrets.NZWAVIQQTMLUFLPOV3AXVJ6MBY }}
       TG_TOKEN: ${{ secrets.TG_TOKEN }}
       TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
