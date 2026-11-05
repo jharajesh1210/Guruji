@@ -166,8 +166,8 @@ def run():
     if now.weekday()>4 or now.time()<dt.time(9,20) or now.time()>dt.time(15,30):
         print('Outside NSE trading window; state unchanged.'); return
     s=load_state()
-    if s['trades_today']>=MAX_DAILY_TRADES or s['equity']<=s['day_start']*(1-MAX_DAILY_LOSS):
-        print('Risk guard active'); save_state(s); return
+    risk_guard=s['trades_today']>=MAX_DAILY_TRADES or s['equity']<=s['day_start']*(1-MAX_DAILY_LOSS)
+    if risk_guard: print('Risk guard active: new entries disabled; managing existing paper positions only')
     api=smartapi_login(); tokens=instrument_map(); count=0
     force_exit=now.time()>=dt.time(15,15)
     for sym,token in tokens.items():
@@ -177,7 +177,7 @@ def run():
                 manage_position(s,sym,d5,force_exit=force_exit)
                 continue
             # No fresh entries in the final 15 minutes; all paper shorts are intraday only.
-            if force_exit or len(s['positions'])>=MAX_POSITIONS or s['trades_today']>=MAX_DAILY_TRADES:
+            if risk_guard or force_exit or len(s['positions'])>=MAX_POSITIONS or s['trades_today']>=MAX_DAILY_TRADES:
                 continue
             d15=get_candles(api,token,'FIFTEEN_MINUTE',15); d60=get_candles(api,token,'ONE_HOUR',45)
             sig=signal(d5,d15,d60)
