@@ -2,7 +2,6 @@ name: SMC Sectorial Angel One Paper Trading
 
 on:
   schedule:
-    # Every 5 minutes during the Indian market-day window (GitHub cron is UTC).
     - cron: '*/5 3-10 * * 1-5'
   workflow_dispatch:
 
@@ -18,13 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # Keep existing saved secret names; values remain in GitHub Secrets.
-      ANGEL_API_KEY: ${{ secrets.AKPVIim8 }}
-      ANGEL_CLIENT_CODE: ${{ secrets.AACN705705 }}
-      ANGEL_PIN: ${{ secrets['1210'] }}
-      ANGEL_TOTP_SECRET: ${{ secrets.NZWAVIQQTMLUFLPOV3AXVJ6MBY }}
-      TG_TOKEN: ${{ secrets.TG_TOKEN }}
-      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+      ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+      ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+      ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+      TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -45,12 +44,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$ANGEL_API_KEY"
-          test -n "$ANGEL_CLIENT_CODE"
-          test -n "$ANGEL_PIN"
-          test -n "$ANGEL_TOTP_SECRET"
-          test -n "$TG_TOKEN"
-          test -n "$TG_CHAT_ID"
+          missing=()
+          for name in ANGEL_API_KEY ANGEL_CLIENT_CODE ANGEL_PIN ANGEL_TOTP_SECRET TG_TOKEN TG_CHAT_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required secret(s): %s\n' "$(IFS=', '; echo "${missing[*]}")"
+            echo "Add the matching values in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "All required Angel One and Telegram secrets are available."
 
       - name: Run Angel One SMC paper strategy
         run: python smc_sectorial_strategy.py
