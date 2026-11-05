@@ -907,9 +907,9 @@ def run_angel_one_paper():
             })
             close_side = "SELL" if pos["signal"] == "LONG" else "BUY"
             send_telegram(
-                f"SMC SECTORIAL PAPER EXIT | RELIANCE | {close_side}\\n"
-                f"Entry: {float(pos['entry_price']):.2f} | Exit: {exit_price:.2f}\\n"
-                f"Qty: {qty} | P&L: {pnl:+.2f} INR\\nReason: {result['reason']}\\n"
+                f"SMC SECTORIAL PAPER EXIT | RELIANCE | {close_side}\n"
+                f"Entry: {float(pos['entry_price']):.2f} | Exit: {exit_price:.2f}\n"
+                f"Qty: {qty} | P&L: {pnl:+.2f} INR\nReason: {result['reason']}\n"
                 f"Mode: PAPER ONLY (NO LIVE ORDER)"
             )
             state["position"] = None
@@ -954,10 +954,10 @@ def run_angel_one_paper():
     save_paper_state(state)
     action = "BUY" if signal["signal"] == "LONG" else "SELL"
     send_telegram(
-        f"SMC SECTORIAL PAPER {action} | RELIANCE\\n"
-        f"Entry: {entry:.2f} | SL: {sl:.2f} | Qty: {qty}\\n"
-        f"Structure: {signal['structure']} | RSI: {signal['rsi']:.1f}\\n"
-        f"Market: {filters['market_bias']} | POC: {signal['poc']:.2f}\\n"
+        f"SMC SECTORIAL PAPER {action} | RELIANCE\n"
+        f"Entry: {entry:.2f} | SL: {sl:.2f} | Qty: {qty}\n"
+        f"Structure: {signal['structure']} | RSI: {signal['rsi']:.1f}\n"
+        f"Market: {filters['market_bias']} | POC: {signal['poc']:.2f}\n"
         f"Mode: PAPER ONLY (NO LIVE ORDER)"
     )
     print(f"Paper {action}: RELIANCE entry={entry:.2f}, SL={sl:.2f}, qty={qty}")
