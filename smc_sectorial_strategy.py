@@ -690,18 +690,263 @@ class SMCSectorialStrategy:
         }
 
 
-if __name__ == "__main__":
-    print("Fetching live/recent data via yfinance...")
-    sensex_df = fetch_yfinance_data("^BSESN", period="5d", interval="5m")
-    stock_df = fetch_yfinance_data("RELIANCE.NS", period="5d", interval="5m")
 
-    if sensex_df is not None and stock_df is not None:
-        cfg = Config()
-        strategy = SMCSectorialStrategy(cfg)
-        trades, stats = strategy.backtest(stock_df, sensex_df)
-        print("--- Strategy Performance Summary ---")
-        print(stats)
-        print("\n--- Executed Trades ---")
-        print(trades)
+
+# ----------------------------------------------------------------------------
+# ANGEL ONE SMARTAPI PAPER-TRADING ADAPTER (NO LIVE ORDERS)
+# ----------------------------------------------------------------------------
+import os
+import json
+import requests
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
+STATE_FILE = "SMC_SECTORIAL_PAPER_STATE.json"
+TRADES_FILE = "SMC_SECTORIAL_PAPER_TRADES.csv"
+
+
+def _env_first(*names):
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def send_telegram(message):
+    token = _env_first("TG_TOKEN", "TELEGRAM_BOT_TOKEN", "BOT_TOKEN")
+    chat_id = _env_first("TG_CHAT_ID", "TELEGRAM_CHAT_ID", "CHAT_ID")
+    if not token or not chat_id:
+        print("Telegram skipped: TG_TOKEN/TG_CHAT_ID secrets are not configured.")
+        return False
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data={"chat_id": chat_id, "text": message},
+            timeout=15,
+        )
+        response.raise_for_status()
+        return True
+    except Exception as exc:
+        print(f"Telegram delivery failed: {exc}")
+        return False
+
+
+def load_paper_state():
+    if not os.path.exists(STATE_FILE):
+        return {"position": None, "last_signal_candle": None, "trade_date": "", "trades_today": 0, "daily_pnl": 0.0}
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        state.setdefault("position", None)
+        state.setdefault("last_signal_candle", None)
+        state.setdefault("trade_date", "")
+        state.setdefault("trades_today", 0)
+        state.setdefault("daily_pnl", 0.0)
+        return state
+    except Exception as exc:
+        raise RuntimeError(f"Paper state file is unreadable; refusing a fresh entry: {exc}")
+
+
+def save_paper_state(state):
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, default=str)
+    os.replace(tmp, STATE_FILE)
+
+
+def angel_one_login():
+    api_key = _env_first("ANGEL_API_KEY")
+    client_code = _env_first("ANGEL_CLIENT_CODE")
+    pin = _env_first("ANGEL_PIN")
+    totp_secret = _env_first("ANGEL_TOTP_SECRET")
+    missing = [name for name, value in (
+        ("ANGEL_API_KEY", api_key), ("ANGEL_CLIENT_CODE", client_code),
+        ("ANGEL_PIN", pin), ("ANGEL_TOTP_SECRET", totp_secret)
+    ) if not value]
+    if missing:
+        raise RuntimeError("Missing GitHub Actions secrets/environment: " + ", ".join(missing))
+    try:
+        import pyotp
+        from SmartApi import SmartConnect
+    except ImportError as exc:
+        raise RuntimeError("Install smartapi-python and pyotp before running.") from exc
+
+    smart = SmartConnect(api_key=api_key)
+    session = smart.generateSession(client_code, pin, pyotp.TOTP(totp_secret).now())
+    if not session or not session.get("status"):
+        raise RuntimeError(f"Angel One login failed: {session}")
+    refresh = session.get("data", {}).get("refreshToken")
+    if refresh:
+        smart.getfeedToken()
+    return smart
+
+
+def angel_search_token(smart, exchange, query, fallback_token=None):
+    result = smart.searchScrip(exchange, query)
+    rows = (result or {}).get("data") or []
+    for row in rows:
+        symbol = str(row.get("tradingsymbol", "")).upper()
+        if query.upper() in symbol:
+            return str(row["symboltoken"]), row.get("tradingsymbol", query)
+    if fallback_token:
+        return str(fallback_token), query
+    raise RuntimeError(f"Angel One could not resolve {query} on {exchange}: {result}")
+
+
+def angel_candles(smart, exchange, token, symbol, interval="FIVE_MINUTE", days=5):
+    now = datetime.now(IST)
+    start = now - timedelta(days=days)
+    params = {
+        "exchange": exchange,
+        "symboltoken": str(token),
+        "interval": interval,
+        "fromdate": start.strftime("%Y-%m-%d %H:%M"),
+        "todate": now.strftime("%Y-%m-%d %H:%M"),
+    }
+    response = smart.getCandleData(params)
+    rows = (response or {}).get("data")
+    if not rows:
+        raise RuntimeError(f"No Angel One candle data for {symbol}: {response}")
+    df = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    if df["timestamp"].dt.tz is None:
+        df["timestamp"] = df["timestamp"].dt.tz_localize(IST)
     else:
-        print("Failed to fetch data from yfinance. Please check internet connection or ticker symbols.")
+        df["timestamp"] = df["timestamp"].dt.tz_convert(IST)
+    df = df.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=["open", "high", "low", "close"])
+    # Use completed 5-minute candles only; never trade on a forming candle.
+    cutoff = now.replace(second=0, microsecond=0)
+    cutoff = cutoff - timedelta(minutes=cutoff.minute % 5)
+    df = df[df.index + timedelta(minutes=5) <= cutoff]
+    if len(df) < 60:
+        raise RuntimeError(f"Insufficient completed 5m candles for {symbol}: {len(df)}")
+    return df
+
+
+def append_paper_trade(record):
+    row = pd.DataFrame([record])
+    row.to_csv(TRADES_FILE, mode="a", header=not os.path.exists(TRADES_FILE), index=False)
+
+
+def run_angel_one_paper():
+    now = datetime.now(IST)
+    if now.weekday() >= 5 or not (dtime(9, 15) <= now.time() <= dtime(15, 30)):
+        print(f"Outside NSE/BSE session; no trade action. IST={now.isoformat()}")
+        return
+    smart = angel_one_login()
+    # Angel One scrip master search resolves current tokens; Sensex fallback is the
+    # commonly published BSE index token. If search works, its returned token wins.
+    rel_token, rel_symbol = angel_search_token(smart, "NSE", "RELIANCE")
+    sx_token, sx_symbol = angel_search_token(smart, "BSE", "SENSEX", fallback_token="99919000")
+    stock = angel_candles(smart, "NSE", rel_token, rel_symbol)
+    sensex = angel_candles(smart, "BSE", sx_token, sx_symbol)
+
+    cfg = Config()
+    strategy = SMCSectorialStrategy(cfg)
+    stock = add_indicators(stock, cfg)
+    sensex = add_indicators(sensex, cfg)
+    common = stock.index.intersection(sensex.index)
+    stock, sensex = stock.loc[common], sensex.loc[common]
+    if len(stock) < 60:
+        raise RuntimeError("RELIANCE and SENSEX candle timestamps do not sufficiently overlap.")
+
+    state = load_paper_state()
+    today = now.date().isoformat()
+    if state["trade_date"] != today:
+        state["trade_date"] = today
+        state["trades_today"] = 0
+        state["daily_pnl"] = 0.0
+
+    last = stock.iloc[-1]
+    candle_time = stock.index[-1].isoformat()
+    if state.get("position"):
+        pos = state["position"]
+        row = stock.iloc[-1]
+        candle = {k: float(row[k]) for k in ("open", "high", "low", "close")}
+        result = strategy.process_step_lock_trailing_sl(candle, pos, bb_mid=float(row["bb_mid"]))
+        if now.time() >= cfg.square_off_time:
+            result = {"action": "EXIT", "execution_price": float(row["close"]), "reason": "Intraday square-off"}
+        if result["action"] == "TRAIL_LOCK":
+            pos["current_sl"] = float(result["new_sl"])
+            state["position"] = pos
+            save_paper_state(state)
+            print(f"Paper trailing SL updated: {pos['current_sl']:.2f}")
+        elif result["action"] == "EXIT":
+            sign = 1 if pos["signal"] == "LONG" else -1
+            exit_price = float(result["execution_price"])
+            qty = int(pos["qty"])
+            gross = sign * (exit_price - float(pos["entry_price"])) * qty
+            costs = (cfg.cost_pct_per_side / 100.0) * (float(pos["entry_price"]) + exit_price) * qty
+            pnl = gross - costs
+            state["daily_pnl"] = float(state.get("daily_pnl", 0.0)) + pnl
+            append_paper_trade({
+                "entry_time": pos["entry_time"], "exit_time": candle_time,
+                "symbol": "RELIANCE", "side": pos["signal"], "qty": qty,
+                "entry": pos["entry_price"], "exit": exit_price, "pnl": round(pnl, 2),
+                "reason": result["reason"], "mode": "PAPER_ONLY"
+            })
+            close_side = "SELL" if pos["signal"] == "LONG" else "BUY"
+            send_telegram(
+                f"SMC SECTORIAL PAPER EXIT | RELIANCE | {close_side}\\n"
+                f"Entry: {float(pos['entry_price']):.2f} | Exit: {exit_price:.2f}\\n"
+                f"Qty: {qty} | P&L: {pnl:+.2f} INR\\nReason: {result['reason']}\\n"
+                f"Mode: PAPER ONLY (NO LIVE ORDER)"
+            )
+            state["position"] = None
+            save_paper_state(state)
+            print(f"Paper exit: {result['reason']} P&L={pnl:.2f}")
+        else:
+            print("Open paper position; no exit condition. No HOLD Telegram sent.")
+        return
+
+    if state.get("last_signal_candle") == candle_time:
+        print("This completed candle was already processed.")
+        return
+    state["last_signal_candle"] = candle_time
+    save_paper_state(state)
+
+    if int(state.get("trades_today", 0)) >= cfg.max_trades_per_day:
+        print("Daily trade limit reached.")
+        return
+    if float(state.get("daily_pnl", 0.0)) <= -cfg.capital * cfg.max_daily_loss_pct / 100:
+        print("Daily loss limit reached.")
+        return
+
+    filters = strategy.analyze_market_filters(sensex)
+    signal = strategy.check_entry_signal_5m(stock.tail(cfg.history_window), filters)
+    if not signal:
+        print(f"No entry signal: {strategy.last_reject}")
+        return
+
+    entry = float(signal["entry_price"])
+    sl = float(signal["initial_sl"])
+    qty = strategy.position_size(entry, sl)
+    if qty < 1:
+        print("Signal rejected: calculated paper quantity is below one.")
+        return
+    pos = {
+        "signal": signal["signal"], "entry_price": entry, "initial_sl": sl,
+        "current_sl": sl, "qty": int(qty), "entry_time": candle_time,
+        "structure": signal["structure"]
+    }
+    state["position"] = pos
+    state["trades_today"] = int(state.get("trades_today", 0)) + 1
+    save_paper_state(state)
+    action = "BUY" if signal["signal"] == "LONG" else "SELL"
+    send_telegram(
+        f"SMC SECTORIAL PAPER {action} | RELIANCE\\n"
+        f"Entry: {entry:.2f} | SL: {sl:.2f} | Qty: {qty}\\n"
+        f"Structure: {signal['structure']} | RSI: {signal['rsi']:.1f}\\n"
+        f"Market: {filters['market_bias']} | POC: {signal['poc']:.2f}\\n"
+        f"Mode: PAPER ONLY (NO LIVE ORDER)"
+    )
+    print(f"Paper {action}: RELIANCE entry={entry:.2f}, SL={sl:.2f}, qty={qty}")
+
+
+if __name__ == "__main__":
+    run_angel_one_paper()
