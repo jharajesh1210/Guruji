@@ -727,6 +727,10 @@ def send_telegram(message):
             timeout=15,
         )
         response.raise_for_status()
+        payload = response.json()
+        if not payload.get("ok"):
+            print(f"Telegram API rejected message: {payload}")
+            return False
         return True
     except Exception as exc:
         print(f"Telegram delivery failed: {exc}")
@@ -735,7 +739,7 @@ def send_telegram(message):
 
 def load_paper_state():
     if not os.path.exists(STATE_FILE):
-        return {"position": None, "last_signal_candle": None, "trade_date": "", "trades_today": 0, "daily_pnl": 0.0}
+        return {"position": None, "last_signal_candle": None, "last_managed_candle": None, "trade_date": "", "trades_today": 0, "daily_pnl": 0.0}
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             state = json.load(f)
@@ -744,6 +748,7 @@ def load_paper_state():
         state.setdefault("trade_date", "")
         state.setdefault("trades_today", 0)
         state.setdefault("daily_pnl", 0.0)
+        state.setdefault("last_managed_candle", None)
         return state
     except Exception as exc:
         raise RuntimeError(f"Paper state file is unreadable; refusing a fresh entry: {exc}")
@@ -774,9 +779,13 @@ def angel_one_login():
         raise RuntimeError("Install smartapi-python and pyotp before running.") from exc
 
     smart = SmartConnect(api_key=api_key)
-    session = smart.generateSession(client_code, pin, pyotp.TOTP(totp_secret).now())
-    if not session or not session.get("status"):
-        raise RuntimeError(f"Angel One login failed: {session}")
+    try:
+        session = smart.generateSession(client_code, pin, pyotp.TOTP(totp_secret).now())
+    except Exception as exc:
+        raise RuntimeError(f"Angel One login request failed: {exc}") from exc
+    if not session or not session.get("status") or not session.get("data"):
+        message = (session or {}).get("message", "No valid session returned")
+        raise RuntimeError(f"Angel One login failed: {message}")
     refresh = session.get("data", {}).get("refreshToken")
     if refresh:
         smart.getfeedToken()
@@ -823,6 +832,8 @@ def angel_candles(smart, exchange, token, symbol, interval="FIVE_MINUTE", days=5
     cutoff = now.replace(second=0, microsecond=0)
     cutoff = cutoff - timedelta(minutes=cutoff.minute % 5)
     df = df[df.index + timedelta(minutes=5) <= cutoff]
+    if not df.empty and (now - df.index[-1].to_pydatetime()) > timedelta(minutes=10):
+        raise RuntimeError(f"Stale Angel One candle data for {symbol}; latest candle={df.index[-1]}")
     if len(df) < 60:
         raise RuntimeError(f"Insufficient completed 5m candles for {symbol}: {len(df)}")
     return df
@@ -867,6 +878,10 @@ def run_angel_one_paper():
     if state.get("position"):
         pos = state["position"]
         row = stock.iloc[-1]
+        if state.get("last_managed_candle") == candle_time and now.time() < cfg.square_off_time:
+            print("This open position was already managed on the latest completed candle.")
+            return
+        state["last_managed_candle"] = candle_time
         candle = {k: float(row[k]) for k in ("open", "high", "low", "close")}
         result = strategy.process_step_lock_trailing_sl(candle, pos, bb_mid=float(row["bb_mid"]))
         if now.time() >= cfg.square_off_time:
