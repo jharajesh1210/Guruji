@@ -1,0 +1,64 @@
+# Smart Money Concepts (SMC) + Volume Profile Intraday Strategy Configuration (v3)
+
+strategy_name: "Smart Money Concepts (SMC) + Volume Profile Intraday Strategy"
+version: "v3"
+
+indicators:
+  rsi_len: 14
+  bb_len: 20
+  bb_std: 2.0
+  atr_len: 14
+  bb_width_window: 50
+  min_width_quantile: 0.20      # BB width quantile threshold for low vol squeeze
+
+structure_order_block:
+  swing_n: 2                      # Fractal swing: n candles left & right
+  break_lookback: 15              # Structure break must occur within this lookback
+  allow_bos: true                 # false = only authentic CHoCH allowed
+  min_session_bars: 12
+
+volume_profile:
+  vp_bins: 24
+  poc_tol_atr: 0.5              # POC max ATR distance to OB zone
+  retest_touch_atr: 0.25
+
+stop_loss_risk:
+  sl_atr_mult: 0.5
+  min_risk_pct: 0.15            # Minimum risk % of entry price
+  max_risk_pct: 1.00            # Skip trade if risk % exceeds this limit
+
+momentum_filters:
+  rsi_long: [52, 75]
+  rsi_short: [25, 48]
+  use_vwap_filter: true
+  use_bb_filter: true
+
+market_filter:
+  neutral_band_pct: 0.10        # Sensex movement within +-0.10% is NEUTRAL
+  top_n_sectors: 2
+
+trailing_sl:
+  be_trigger_r: 1.0             # Move to Breakeven at 1R
+  be_buffer_r: 0.10             # Breakeven + cost buffer
+  lock_offset_r: 1.0            # Offset for locking SL (2R -> Lock 1R)
+  final_target_r: 5.0
+  use_bb_trail: true            # Trail SL to BB Middle Band after 2R
+
+time_filters_ist:
+  no_trade_before: "09:30:00"
+  last_entry_time: "15:00:00"
+  square_off_time: "15:15:00"
+
+risk_management:
+  capital: 100000.0
+  risk_per_trade_pct: 0.5
+  max_trades_per_day: 3
+  max_daily_loss_pct: 2.0
+  leverage: 5.0
+
+frictional_costs:
+  cost_pct_per_side: 0.03
+  slippage_pct: 0.02
+
+backtest_lookback:
+  history_window: 160
