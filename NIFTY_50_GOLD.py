@@ -53,6 +53,9 @@ def indicators(d):
     d['atr']=tr.ewm(alpha=1/14,adjust=False).mean(); up=d.high.diff(); dn=-d.low.diff(); plus=up.where((up>dn)&(up>0),0).ewm(alpha=1/14,adjust=False).mean(); minus=dn.where((dn>up)&(dn>0),0).ewm(alpha=1/14,adjust=False).mean(); d['adx']=(100*(plus-minus).abs()/(plus+minus).replace(0,np.nan)).ewm(alpha=1/14,adjust=False).mean()
     tp=(d.high+d.low+d.close)/3; day=d.ts.dt.date; d['vwap']=(tp*d.volume).groupby(day).cumsum()/d.volume.groupby(day).cumsum().replace(0,np.nan)
     mid=d.close.rolling(20).mean(); sd=d.close.rolling(20).std(ddof=0); d['bb_up']=mid+2*sd; d['bb_dn']=mid-2*sd
+    # Keltner Channel: EMA20 +/- 1.5 ATR, used to identify a genuine volatility squeeze.
+    d['kc_mid']=d.close.ewm(span=20,adjust=False).mean()
+    d['kc_up']=d.kc_mid+1.5*d.atr; d['kc_dn']=d.kc_mid-1.5*d.atr
     return d
 
 def smartapi_login():
@@ -85,71 +88,108 @@ def get_candles(api, token, interval, days):
     return indicators(d)
 
 def signal(d5,d15,d60):
-    x=d5.iloc[-2]; c=d5.iloc[-1]; direction=1 if x.close>x.bb_up and c.high>x.high else -1 if x.close<x.bb_dn and c.low<x.low else 0
-    if not direction:return None
-    body=abs(x.close-x.open)/max(x.high-x.low,1e-9)
+    # x is the breakout candle; c is the next fully closed confirmation candle.
+    x=d5.iloc[-2]; c=d5.iloc[-1]
+    if len(d5)<310:return None
+    body=abs(float(x.close-x.open))/max(float(x.high-x.low),1e-9)
     volbase=float(d5.volume.iloc[-22:-2].mean())
-    mid=d5.close.rolling(20).mean(); sd=d5.close.rolling(20).std(ddof=0); width=(2*sd)/mid.replace(0,np.nan)
-    squeeze=float(width.iloc[-3])<=float(width.iloc[-103:-3].quantile(.2)) if len(width.dropna())>=103 else False
-    setup='B_SQUEEZE_BREAKOUT' if squeeze else 'A_VOLUME_BREAKOUT_PROXY'
-    if body<.60 or x.volume<1.5*volbase:return None
+    if body<0.60 or x.volume<1.5*volbase:return None
+
+    # Setup A: real 288-bar rolling range breakout (exclude the breakout candle itself).
+    prior_high=float(d5.high.iloc[-290:-2].max())
+    prior_low=float(d5.low.iloc[-290:-2].min())
+    a_dir=1 if x.close>prior_high and c.high>x.high else -1 if x.close<prior_low and c.low<x.low else 0
+
+    # Setup B: BB inside Keltner squeeze on the preceding candle, followed by BB breakout.
+    squeeze_prev=bool(d5.bb_up.iloc[-3]<d5.kc_up.iloc[-3] and d5.bb_dn.iloc[-3]>d5.kc_dn.iloc[-3])
+    b_dir=1 if squeeze_prev and x.close>x.bb_up and c.high>x.high else -1 if squeeze_prev and x.close<x.bb_dn and c.low<x.low else 0
+    if a_dir and b_dir and a_dir!=b_dir:return None
+    direction=a_dir or b_dir
+    if not direction:return None
+    setup='A_288_BAR_RANGE_BREAKOUT' if a_dir else 'B_BB_KELTNER_SQUEEZE_BREAKOUT'
+
+    # Multi-timeframe trend, VWAP and momentum confirmation.
     if direction*(x.close-x.ema200)<=0 or direction*(d15.close.iloc[-1]-d15.ema200.iloc[-1])<=0:return None
-    if direction*(d15.close.iloc[-1]-d15.open.iloc[-1])<=0 or direction*(d60.ema50.iloc[-1]-d60.ema200.iloc[-1])<=0:return None
+    if direction*(d15.close.iloc[-1]-d15.open.iloc[-1])<=0:return None
+    if direction*(d60.ema50.iloc[-1]-d60.ema200.iloc[-1])<=0:return None
     if direction*(x.close-x.vwap)<=0 or x.adx<=20:return None
+
     atr=float(x.atr); entry=float(x.high if direction>0 else x.low)*(1+direction*SLIPPAGE)
-    stop_c=float(x.low if direction>0 else x.high); stop_a=entry-direction*1.5*atr
-    stop=max(stop_c,stop_a) if direction>0 else min(stop_c,stop_a); risk=abs(entry-stop)
+    candle_stop=float(x.low if direction>0 else x.high); atr_stop=entry-direction*1.5*atr
+    stop=max(candle_stop,atr_stop) if direction>0 else min(candle_stop,atr_stop)
+    risk=abs(entry-stop)
     if risk<=0 or risk>1.5*atr:return None
     cost_r=(2*FEE+2*SLIPPAGE)*entry/risk
     if cost_r>1:return None
-    return {'side':'BUY' if direction>0 else 'SELL','direction':direction,'setup':setup,'entry':entry,'stop':stop,'risk':risk,'cost_r':round(cost_r,3),'bar':str(c.ts)}
-
-def manage_position(s,sym,d):
+    return {'side':'BUY' if direction>0 else 'SELL','direction':direction,'setup':setup,
+            'entry':entry,'stop':stop,'risk':risk,'cost_r':round(cost_r,3),'bar':str(c.ts)}
+def manage_position(s,sym,d,force_exit=False):
     p=s['positions'].get(sym)
     if not p:return
-    price=float(d.close.iloc[-1]); direction=p['direction']; risk=p['risk']; mult=direction*(price-p['entry'])/risk
-    if mult>=5: reason='5R_FINAL'; exit_price=price
+    bar=d.iloc[-1]; direction=p['direction']; risk=float(p['risk'])
+    hi=float(bar.high); lo=float(bar.low); close=float(bar.close)
+    old_stop=float(p['stop'])
+    # Conservative OHLC handling: if stop and a profit milestone are both touched
+    # in one candle, assume the stop was hit first (no optimistic intrabar ordering).
+    stop_hit=(lo<=old_stop) if direction>0 else (hi>=old_stop)
+    if stop_hit:
+        reason='STOP_LOCK' if p.get('level',0)>0 else 'INITIAL_STOP'
+        exit_price=old_stop
+    elif force_exit:
+        reason='EOD_SQUARE_OFF'; exit_price=close
     else:
-        level=min(4,max(0,int(np.floor(mult+1e-9))))
-        if level>p.get('level',0): p['level']=level; p['stop']=p['entry']+direction*max(0,level-1)*risk
-        if direction*(price-p['stop'])<=0: reason='STOP_LOCK'; exit_price=price
+        favorable=(hi-p['entry'])/risk if direction>0 else (p['entry']-lo)/risk
+        if favorable>=5:
+            reason='5R_FINAL'; exit_price=p['entry']+direction*5*risk
         else:
+            reached=min(4,max(0,int(np.floor(favorable+1e-9))))
+            if reached>p.get('level',0):
+                p['level']=reached
+                p['stop']=p['entry']+direction*max(0,reached-1)*risk
             p['bars']=p.get('bars',0)+1
-            if p['bars']<30:return
-            if p['level']>0:return
-            reason='STALL_EXIT'; exit_price=price
-    exit_price*=1-direction*SLIPPAGE; pnl=direction*(exit_price-p['entry'])*p['qty']-(exit_price+p['entry'])*p['qty']*FEE
-    r=pnl/(risk*p['qty']) if risk*p['qty'] else 0; s['equity']+=pnl
-    log_trade({'time':dt.datetime.now(IST).isoformat(),'symbol':sym,'setup':p['setup'],'side':p['side'],'entry':p['entry'],'exit':exit_price,'qty':p['qty'],'reason':reason,'pnl':round(pnl,2),'r':round(r,3)})
+            if p['bars']>=30 and p.get('level',0)==0:
+                reason='STALL_EXIT'; exit_price=close
+            else:
+                return
+    exit_price*=1-direction*SLIPPAGE
+    pnl=direction*(exit_price-p['entry'])*p['qty']-(exit_price+p['entry'])*p['qty']*FEE
+    r=pnl/(risk*p['qty']) if risk*p['qty'] else 0
+    s['equity']+=pnl
+    log_trade({'time':dt.datetime.now(IST).isoformat(),'symbol':sym,'setup':p['setup'],'side':p['side'],
+               'entry':p['entry'],'exit':exit_price,'qty':p['qty'],'reason':reason,'pnl':round(pnl,2),'r':round(r,3)})
     notify(f'NIFTY 50 GOLD PAPER EXIT | {sym} | {p["side"]} | {reason} | P&L ₹{pnl:.2f} | Equity ₹{s["equity"]:.2f}')
     del s['positions'][sym]
-
 def run():
     if os.getenv('GITHUB_EVENT_NAME')=='workflow_dispatch' and os.getenv('TELEGRAM_TEST','1')=='1':
         notify('NIFTY 50 GOLD | Angel One PAPER scanner Telegram test successful | No live orders.',required=True)
     now=dt.datetime.now(IST)
-    if now.weekday()>4 or not (now.hour>9 or (now.hour==9 and now.minute>=20)) or now.hour>15 or (now.hour==15 and now.minute>20):
-        print('Outside NSE scan window; state unchanged.'); return
+    if now.weekday()>4 or now.time()<dt.time(9,20) or now.time()>dt.time(15,30):
+        print('Outside NSE trading window; state unchanged.'); return
     s=load_state()
-    if s['trades_today']>=MAX_DAILY_TRADES or s['equity']<=s['day_start']*(1-MAX_DAILY_LOSS): print('Risk guard active'); save_state(s); return
+    if s['trades_today']>=MAX_DAILY_TRADES or s['equity']<=s['day_start']*(1-MAX_DAILY_LOSS):
+        print('Risk guard active'); save_state(s); return
     api=smartapi_login(); tokens=instrument_map(); count=0
+    force_exit=now.time()>=dt.time(15,15)
     for sym,token in tokens.items():
         try:
             d5=get_candles(api,token,'FIVE_MINUTE',5)
             if sym in s['positions']:
-                manage_position(s,sym,d5); continue
-            if len(s['positions'])>=MAX_POSITIONS or s['trades_today']>=MAX_DAILY_TRADES: break
+                manage_position(s,sym,d5,force_exit=force_exit)
+                continue
+            # No fresh entries in the final 15 minutes; all paper shorts are intraday only.
+            if force_exit or len(s['positions'])>=MAX_POSITIONS or s['trades_today']>=MAX_DAILY_TRADES:
+                continue
             d15=get_candles(api,token,'FIFTEEN_MINUTE',15); d60=get_candles(api,token,'ONE_HOUR',45)
             sig=signal(d5,d15,d60)
             if not sig or sig['bar']==s.get('last_entry_bar',{}).get(sym):continue
             qty=min((s['equity']*RISK_PCT)/sig['risk'],(s['equity']*2)/sig['entry'])
             if qty<=0:continue
-            p={**sig,'qty':qty,'bars':0,'level':0}; s['positions'][sym]=p; s['trades_today']+=1; s.setdefault('last_entry_bar',{})[sym]=sig['bar']; count+=1
-            notify(f'NIFTY 50 GOLD PAPER ENTRY | {sym} | {sig["side"]} | {sig["setup"]} | Entry ₹{sig["entry"]:.2f} | SL ₹{sig["stop"]:.2f} | Qty {qty:.2f} | PAPER ONLY')
+            p={**sig,'qty':qty,'bars':0,'level':0}
+            s['positions'][sym]=p; s['trades_today']+=1
+            s.setdefault('last_entry_bar',{})[sym]=sig['bar']; count+=1
+            notify(f'NIFTY 50 GOLD PAPER ENTRY | {sym} | {sig["side"]} | {sig["setup"]} | Entry ₹{sig["entry"]:.2f} | SL ₹{sig["stop"]:.2f} | Qty {qty:.2f} | PAPER INTRADAY ONLY')
         except Exception as e: print('SCAN ERROR',sym,repr(e))
         time.sleep(.15)
-    save_state(s); print('SCAN COMPLETE | entries',count,'| open',len(s['positions']),'| equity',round(s['equity'],2))
+    save_state(s)
+    print('SCAN COMPLETE | entries',count,'| open',len(s['positions']),'| equity',round(s['equity'],2))
 
-if __name__=='__main__':
-    try: run()
-    except Exception as e: print('FATAL:',repr(e),file=sys.stderr); sys.exit(1)
