@@ -21,8 +21,8 @@ jobs:
       ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
       ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
       ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
-      TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TG_TOKEN: ${{ secrets.TG_TOKEN || secrets.TELEGRAM_BOT_TOKEN || secrets.BOT_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID || secrets.TELEGRAM_CHAT_ID || secrets.CHAT_ID }}
 
     steps:
       - name: Checkout repository
@@ -52,7 +52,7 @@ jobs:
           done
           if (( ${#missing[@]} > 0 )); then
             printf 'Missing required secret(s): %s\n' "$(IFS=', '; echo "${missing[*]}")"
-            echo "Add the matching values in Settings > Secrets and variables > Actions."
+            echo "Set one supported Telegram token secret (TG_TOKEN / TELEGRAM_BOT_TOKEN / BOT_TOKEN) and one chat ID secret (TG_CHAT_ID / TELEGRAM_CHAT_ID / CHAT_ID) in Settings > Secrets and variables > Actions."
             exit 1
           fi
           echo "All required Angel One and Telegram secrets are available."
