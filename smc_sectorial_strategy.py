@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Smart Money Concepts (SMC) + Volume Profile Intraday Strategy -- v3 (Fully Fixed)
+Smart Money Concepts (SMC) + Volume Profile Intraday Strategy -- v3 (Fully Fixed with yfinance)
 
 Bug Fixes & Refinements in v3:
   1. Fixed Swing & Structure Break Search Logic: Corrected reverse iteration bug.
@@ -8,12 +8,17 @@ Bug Fixes & Refinements in v3:
   3. Strict Timestamp Alignment: Integrated robust timestamp-sync for Stock & Sensex data during backtesting.
   4. Symmetric Bearish Logic: Replaced mirror dataframe trick with dedicated bearish setup logic for accurate indicator scaling.
   5. Enhanced Position Sizing & Frictional Cost Accounting.
+  6. Integrated yfinance live/historical data fetcher for seamless execution.
 """
 
 from dataclasses import dataclass
 from datetime import time as dtime
 import numpy as np
 import pandas as pd
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
 
 
 # ----------------------------------------------------------------------------
@@ -101,6 +106,40 @@ def _session(df):
     return df
 
 
+def fetch_yfinance_data(ticker="^BSESN", period="5d", interval="5m"):
+    """
+    yfinance utility to fetch intraday 5-minute data with proper formatting and IST alignment.
+    """
+    if yf is None:
+        raise ImportError("yfinance is not installed. Run 'pip install yfinance'")
+    
+    df = yf.download(ticker, period=period, interval=interval, progress=False)
+    if df.empty:
+        return None
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.droplevel(1)
+
+    df = df.rename(columns={
+        "Open": "open",
+        "High": "high",
+        "Low": "low",
+        "Close": "close",
+        "Volume": "volume"
+    })
+
+    df = df[["open", "high", "low", "close", "volume"]].dropna()
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = df[col].astype(float)
+
+    if df.index.tz is None:
+        df.index = pd.to_datetime(df.index).tz_localize("UTC").tz_convert("Asia/Kolkata")
+    else:
+        df.index = df.index.tz_convert("Asia/Kolkata")
+
+    return df
+
+
 def add_indicators(df, cfg=None):
     """Calculates RSI, Bollinger Bands, ATR, and Session VWAP."""
     cfg = cfg or Config()
@@ -165,7 +204,6 @@ def volume_profile(session_df, bins=24):
     pi = int(np.argmax(prof))
     poc = (edges[pi] + edges[pi + 1]) / 2.0
 
-    # 70% Value Area
     total, acc = prof.sum(), prof[pi]
     lo_i = hi_i = pi
     while acc < 0.7 * total and (lo_i > 0 or hi_i < bins - 1):
@@ -650,3 +688,20 @@ class SMCSectorialStrategy:
             "max_drawdown": round(float((eq - peak).min()), 2),
             "exit_reasons": tdf["reason"].value_counts().to_dict(),
         }
+
+
+if __name__ == "__main__":
+    print("Fetching live/recent data via yfinance...")
+    sensex_df = fetch_yfinance_data("^BSESN", period="5d", interval="5m")
+    stock_df = fetch_yfinance_data("RELIANCE.NS", period="5d", interval="5m")
+
+    if sensex_df is not None and stock_df is not None:
+        cfg = Config()
+        strategy = SMCSectorialStrategy(cfg)
+        trades, stats = strategy.backtest(stock_df, sensex_df)
+        print("--- Strategy Performance Summary ---")
+        print(stats)
+        print("\n--- Executed Trades ---")
+        print(trades)
+    else:
+        print("Failed to fetch data from yfinance. Please check internet connection or ticker symbols.")
