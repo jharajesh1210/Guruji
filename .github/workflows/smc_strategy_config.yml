@@ -1,29 +1,36 @@
-name: Run SMC Trading Strategy
+name: Run SMC Trading Strategy[cite: 1]
 
 on:
   schedule:
-    # Har 15 minute mein automated run karne ke liye cron schedule
-    - cron: '*/15 * * * *'
-  workflow_dispatch: # GitHub interface se manual run karne ke button ke liye
+    # Har 15 minute mein automated run karne ke liye cron schedule[cite: 1]
+    - cron: '*/15 * * * *'[cite: 1]
+  workflow_dispatch: # GitHub interface se manual run karne ke button ke liye[cite: 1]
 
 jobs:
   run-python-script:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest[cite: 1]
+
+    # Yahan apne Angel One credentials ke secrets add karne hain:
+    env:
+      ANGEL_API_KEY: ${{ secrets.AKPVIim8 }}
+      ANGEL_CLIENT_CODE: ${{ secrets.AACN705705 }}
+      ANGEL_PIN: ${{ secrets.1210 }}
+      ANGEL_TOTP_SECRET: ${{ secrets.NZWAVIQQTMLUFLPOV3AXVJ6MBY }}
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+    - name: Checkout Repository[cite: 1]
+      uses: actions/checkout@v4[cite: 1]
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Set up Python[cite: 1]
+      uses: actions/setup-python@v5[cite: 1]
       with:
-        python-version: '3.12'
+        python-version: '3.12'[cite: 1]
 
-    - name: Install Dependencies
+    - name: Install Dependencies[cite: 1]
       run: |
         python -m pip install --upgrade pip
-        pip install pandas numpy ta ccxt yfinance
+        pip install pandas numpy ta ccxt yfinance smartapi-python pyotp python-dotenv
 
-    - name: Run Strategy Script
+    - name: Run Strategy Script[cite: 1]
       run: |
-        python smc_sectorial_strategy.py
+        python smc_sectorial_strategy.py[cite: 1]
