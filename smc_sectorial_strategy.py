@@ -932,6 +932,20 @@ def _close_paper_position(state, symbol, pos, candle_time, result, cfg):
 
 
 def run_angel_one_paper():
+    # Send a Telegram confirmation only when the workflow is started manually.
+    # Scheduled five-minute scans do not generate test-message spam.
+    if os.getenv("GITHUB_EVENT_NAME", "").strip() == "workflow_dispatch":
+        test_message = (
+            "ANGEL ONE NIFTY50 SMC PAPER | TELEGRAM TEST SUCCESS\n"
+            "GitHub Actions manual test reached the Telegram send step.\n"
+            "Mode: PAPER ONLY (NO LIVE ORDER)"
+        )
+        if not send_telegram(test_message):
+            raise RuntimeError(
+                "Telegram test failed. Check TG_TOKEN/TELEGRAM_BOT_TOKEN/BOT_TOKEN "
+                "and TG_CHAT_ID/TELEGRAM_CHAT_ID/CHAT_ID GitHub Actions secrets."
+            )
+        print("Telegram manual test message delivered successfully.")
     now = datetime.now(IST)
     if now.weekday() >= 5 or not (dtime(9, 15) <= now.time() <= dtime(15, 30)):
         print(f"Outside NSE session; no trade action. IST={now.isoformat()}")
