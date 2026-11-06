@@ -1,7 +1,13 @@
 {
-  "last_bar": "2026-11-06T17:15:00+00:00",
+  "last_bar": "2026-11-06T22:00:00+00:00",
   "position": null,
-  "setup": null,
+  "setup": {
+    "side": "SELL",
+    "stage": "SWEEP",
+    "extreme": 76182.5,
+    "break_level": 75644.0,
+    "expires": "2026-11-07T04:00:00+00:00"
+  },
   "closed": 0,
   "realized_usdt": 0.0
 }
