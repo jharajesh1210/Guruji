@@ -360,7 +360,7 @@ def manage(pos, x, ts):
     target = entry+side*4*risk
     if (x.high >= target if side == 1 else x.low <= target):
         return (target*(1-side*SLIPPAGE), 'TARGET_4R')
-    if ts.time() >= time(15, 10):
+    if ts.time() >= time(15, 0):
         return (float(x.close)*(1-side*SLIPPAGE), 'EOD')
     # Stop changes become effective from the next candle.
     if (x.high >= entry+side*3*risk if side == 1 else x.low <= entry+side*3*risk):
@@ -418,7 +418,7 @@ def run(mode, use_index_filter=True):
     dp = state.setdefault('day_pnl', {'day': today, 'pnl': 0.0})
     if dp.get('day') != today:
         state['day_pnl'] = dp = {'day': today, 'pnl': 0.0}
-    if mode == 'paper' and (now.weekday() > 4 or not time(9, 45) <= now.time() < time(15, 45)):
+    if mode == 'paper' and (now.weekday() > 4 or not time(9, 15) <= now.time() < time(15, 0)):
         print('Outside NSE paper window')
         return
     cutoff = now-timedelta(minutes=5, seconds=30)
