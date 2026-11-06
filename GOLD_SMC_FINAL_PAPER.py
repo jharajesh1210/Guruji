@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 SYMBOLS = {"XAUUSDT": {"long": True, "short": True},
            "PAXGUSDT": {"long": False, "short": True}}
 START_EQUITY = 1000.0
-RISK_PCT = 0.01
+RISK_PCT = 0.005
 FEE_RATE = 0.0005
 EMA_FAST, EMA_SLOW = 50, 200
 ATR_LEN, SWING_N, PIVOT_SPAN = 14, 3, 60
