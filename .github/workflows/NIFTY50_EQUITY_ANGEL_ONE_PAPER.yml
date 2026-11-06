@@ -2,8 +2,10 @@ name: NIFTY50 Equity Angel One Paper Trading
 
 on:
   schedule:
-    # NSE cash session is 03:45-10:00 UTC; the script enforces IST market hours.
-    - cron: "*/5 3-10 * * 1-5"
+    # IST 09:15-15:00, Monday-Friday (GitHub cron uses UTC).
+    - cron: "45,50,55 3 * * 1-5"
+    - cron: "*/5 4-8 * * 1-5"
+    - cron: "0,5,10,15,20,25,30 9 * * 1-5"
   workflow_dispatch:
 
 permissions:
