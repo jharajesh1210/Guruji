@@ -129,7 +129,7 @@ def load_seen_signals():
 # Angel One SmartAPI read-only market-data connection. No order APIs are called.
 SMART = None
 TOKEN_CACHE = {}
-INDEX_TOKEN = os.getenv('ANGEL_NIFTY_TOKEN', '99926000')
+INDEX_TOKEN = os.getenv('ANGEL_NIFTY_TOKEN') or '99926000'
 
 
 def smart_client():
