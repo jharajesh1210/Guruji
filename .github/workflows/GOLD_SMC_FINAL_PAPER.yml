@@ -1,0 +1,55 @@
+name: GOLD SMC Final Paper Trading
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gold-smc-final-paper
+  cancel-in-progress: false
+
+jobs:
+  paper-trading:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository and restore paper state
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run CoinDCX paper bot for this 15-minute window
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=20s 14m python GOLD_SMC_FINAL_PAPER.py --live
+          code=$?
+          if [ "$code" -ne 124 ] && [ "$code" -ne 143 ] && [ "$code" -ne 0 ]; then
+            echo "Paper bot exited with code $code"
+            exit "$code"
+          fi
+          echo "Scheduled paper-trading window finished (timeout exit: $code)"
+
+      - name: Persist paper state and trade log
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add paper_state.json paper_trades.csv 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Persist GOLD SMC paper trading state"
+            git push
+          else
+            echo "No paper state or trade-log changes to commit."
+          fi
