@@ -38,7 +38,7 @@ jobs:
       - name: Run historical backtest
         shell: bash
         run: |
-          DAYS='\${{ github.event.inputs.days }}'
+          DAYS='${{ github.event.inputs.days }}'
           python -u NIFTY_FUT_COMBO.py backtest --fetch --days "$DAYS" --save-trades NIFTY_FUT_COMBO_BACKTEST_TRADES.csv 2>&1 | tee NIFTY_FUT_COMBO_BACKTEST_REPORT.txt
       - name: Upload backtest report and trades
         if: always()
