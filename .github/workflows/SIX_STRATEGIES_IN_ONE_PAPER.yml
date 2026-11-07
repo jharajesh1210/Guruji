@@ -26,7 +26,6 @@ jobs:
           - BTC_EMA_ADX
           - BTC_SMC_VP
           - GOLD_COMBO
-          - CRYPTO_TOP100
           - TOP100_AMC_POC
     env:
       STRATEGY: ${{ matrix.strategy }}
@@ -50,7 +49,6 @@ jobs:
             BTC_EMA_ADX) FILES="coindcx_futures_paper_state.json coindcx_futures_paper_trades.csv" ;;
             BTC_SMC_VP) FILES="coindcx_futures_smc_vp_state.json coindcx_futures_smc_vp_trades.csv" ;;
             GOLD_COMBO) FILES="GOLD_COMBO_PAPER_state.json GOLD_COMBO_PAPER_trades.csv GOLD_COMBO_PAPER_signals.csv" ;;
-            CRYPTO_TOP100) FILES="paper_state.json paper_trades.csv" ;;
             TOP100_AMC_POC) FILES="TOP100_CRIPTO_AMC_POC_V4_state.json TOP100_CRIPTO_AMC_POC_V4_trades.csv TOP100_CRIPTO_AMC_POC_V4_signals.csv TOP100_CRIPTO_AMC_POC_V4_skipped.csv TOP100_CRIPTO_AMC_POC_V4_universe.csv" ;;
             *) exit 2 ;;
           esac
