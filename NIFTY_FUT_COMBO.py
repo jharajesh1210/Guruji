@@ -154,7 +154,7 @@ def load_csv(path: str) -> pd.DataFrame:
     return df[~df.index.duplicated()].sort_index()
 
 
-SCRIP_URL = "https://margincalculator.angelbroking.com/OpenAPI_Files/files/OpenAPIScripMaster.json"
+SCRIP_URL = "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 _SESSION: dict = {"obj": None}
 
 
