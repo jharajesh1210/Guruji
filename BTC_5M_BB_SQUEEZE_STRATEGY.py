@@ -49,7 +49,7 @@ def indicators(d):
     x["upper"]=x.mid+2*sd; x["lower"]=x.mid-2*sd
     x["width"]=(x.upper-x.lower)/x.mid
     x["squeeze"]=x.width <= x.width.shift(1).rolling(100,min_periods=40).quantile(.20)
-    x["recent_sq"]=x.squeeze.shift(1).rolling(12,min_periods=1).max().fillna(0).astype(bool)
+    x["recent_sq"]=x["squeeze"].shift(1).rolling(12,min_periods=1).max().fillna(0).astype(bool)
     delta=c.diff(); gain=delta.clip(lower=0); loss=-delta.clip(upper=0)
     ag=gain.ewm(alpha=1/14,adjust=False,min_periods=14).mean()
     al=loss.ewm(alpha=1/14,adjust=False,min_periods=14).mean()
