@@ -25,10 +25,8 @@ jobs:
         env:
           COINDCX_PAIR: B-BTC_USDT
           CAPITAL_PER_TRADE_USDT: '100'
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TG_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python -u BTC_5M_BB_SQUEEZE_STRATEGY.py
       - name: Save paper state and trade history
         if: always()
