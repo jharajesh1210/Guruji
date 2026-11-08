@@ -4,9 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   btc-backtest:
@@ -36,6 +38,27 @@ jobs:
             exit 1
           fi
           python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --test-telegram
+      - name: Run BTC 5m paper scanner cycle (scheduled)
+        if: github.event_name == 'schedule'
+        env:
+          TG_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --mode paper --capital 1000 --margin 100 --leverage 30
+
+      - name: Persist paper state and trade history
+        if: github.event_name == 'schedule'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add BTC_DUAL_PULLBACK_PAPER_STATE.json BTC_DUAL_PULLBACK_PAPER_TRADES.csv BTC_DUAL_PULLBACK_PAPER_EQUITY.csv
+          if ! git diff --cached --quiet; then
+            git commit -m "Update BTC 5m paper trading state"
+            git push
+          else
+            echo "No paper state changes to persist."
+          fi
+
       - name: Run BTC dual LONG-SHORT pullback backtest
         if: github.event_name != 'workflow_dispatch'
         run: |
