@@ -28,7 +28,7 @@ def condition_diagnostics(x):
       "WEEKLY_HIGH_EXHAUSTION": ["rising_highs_4","prior_breakout","high_above_prev_week_high","close_below_prev_week_high","bear_strong","rsi_prev_above_70_falling","macd_bear_turn","macd_hist_negative","opening_green_strong","volume_spike","all_setup_conditions"],
       "BB_MIDDLE_REJECTION": ["bb_touches_12_between_2_3","high_near_bb_mid","close_below_bb_mid","bear_strong","macd_below_signal","macd_hist_negative","rsi_between_45_52","rsi_falling","volume_spike","all_setup_conditions"]
     }
-    counts["setups"] = {k: {"conditions": {n: 0 for n in v}} for k,v in names.items()}
+    counts["setups"] = {k: {"conditions": {n: 0 for n in v}, "cumulative_funnel": {}} for k,v in names.items()}
     for i in range(300, len(x)):
         b=x.iloc[i]; p=x.iloc[i-1]
         if not bool(b.get("or_filter",False) and b.get("near_weekly_level",False) and b.get("liquid_24h",False)):
@@ -62,9 +62,17 @@ def condition_diagnostics(x):
         s4=[bool(2<=float(b["bb_touches_12"])<=3),bool(b["high"]>=b["bb_mid"]-0.15*b["atr"]),bool(b["close"]<b["bb_mid"]),bool(b["bear_strong"]),bool(b["macd"]<b["macd_signal"]),bool(b["macd_hist"]<0),bool(45<=b["rsi"]<=52),bool(b["rsi"]<p["rsi"]),bool(b["volume_spike"])]
         for setup, vals in zip(names,[s1,s2,s3,s4]):
             c=counts["setups"][setup]["conditions"]
-            for key,val in zip(names[setup][:-1],vals):
+            keys=names[setup][:-1]
+            for key,val in zip(keys,vals):
                 c[key]+=int(val)
             c["all_setup_conditions"]+=int(all(vals))
+            # Ordered funnel: count how many candidates survive each successive original condition.
+            funnel=counts["setups"][setup]["cumulative_funnel"]
+            running=True
+            for key,val in zip(keys,vals):
+                running = running and bool(val)
+                funnel[key] = funnel.get(key,0) + int(running)
+            funnel["all_conditions"] = funnel.get("all_conditions",0) + int(all(vals))
     return counts
 
 
