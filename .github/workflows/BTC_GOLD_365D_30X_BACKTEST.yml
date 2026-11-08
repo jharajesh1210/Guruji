@@ -25,6 +25,17 @@ jobs:
           python -m pip install pandas numpy requests
       - name: Compile existing BTC script
         run: python -m py_compile BTC_FUTURES_DONCHIAN_BACKTEST_30X.py
+      - name: Send Telegram connectivity test (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+            echo "::error::GitHub Secrets TG_TOKEN and TG_CHAT_ID must both be configured."
+            exit 1
+          fi
+          python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --test-telegram
       - name: Run BTC dual LONG-SHORT pullback backtest
         run: |
           python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --days 365 --capital 1000 --margin 100 --leverage 30 --funding-rate 0.0001 --maintenance-margin-rate 0.005 --out BTC_DUAL_PULLBACK_RESULTS | tee BTC_BACKTEST_LOG.txt
