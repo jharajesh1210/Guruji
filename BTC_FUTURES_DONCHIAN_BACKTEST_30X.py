@@ -19,6 +19,8 @@ guard are included. Historical funding is not supplied by this model.
 This is a research backtest only; no exchange orders are sent.
 """
 import argparse
+import json
+import os
 import time
 from pathlib import Path
 
@@ -294,8 +296,220 @@ def simulate(d, long_signal, short_signal, capital, margin, leverage, fee,
     return trade_frame, equity_frame, summary
 
 
+
+def send_paper_telegram(message):
+    token = os.getenv("TG_TOKEN", "").strip()
+    chat_id = os.getenv("TG_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        print("Telegram skipped: set TG_TOKEN and TG_CHAT_ID environment variables.")
+        return
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data={"chat_id": chat_id, "text": message},
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("ok"):
+            raise RuntimeError(f"Telegram API rejected message: {payload}")
+        print("Telegram alert sent.")
+    except Exception as exc:
+        print(f"Telegram alert failed: {exc}")
+
+
+def append_csv_row(path, row):
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([row]).to_csv(
+        target, mode="a", header=not target.exists(), index=False
+    )
+
+
+def run_paper_cycle(args):
+    state_path = Path(args.paper_state)
+    if state_path.exists():
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    else:
+        state = {
+            "cash": float(args.capital),
+            "position": None,
+            "last_processed_candle": None,
+        }
+
+    candles = get_data(3)
+    data, long_signal, short_signal = build_signals(candles)
+    if data.empty:
+        raise RuntimeError("No completed candles available.")
+    candle_time = data.index[-1]
+    now = pd.Timestamp.now(tz="UTC")
+    age_minutes = (now - candle_time).total_seconds() / 60
+    if age_minutes > 12:
+        raise RuntimeError(
+            f"Latest completed candle is stale ({age_minutes:.1f} minutes old); no state changed."
+        )
+    candle_key = candle_time.isoformat()
+    if state.get("last_processed_candle") == candle_key:
+        print(f"No new closed 5m candle: {candle_key}")
+        return
+    if len(data) < 250:
+        raise RuntimeError(f"Insufficient candles for indicators: {len(data)}")
+
+    candle = data.iloc[-1]
+    cash = float(state["cash"])
+    position = state.get("position")
+    had_position_at_start = position is not None
+    fee = float(args.fee)
+    slippage = float(args.slippage)
+    funding_rate = float(args.funding_rate)
+    margin = float(args.margin)
+    leverage = float(args.leverage)
+    notional = margin * leverage
+    event_message = None
+
+    if position is not None:
+        side = int(position["side"])
+        next_funding = pd.Timestamp(position["next_funding"])
+        if next_funding.tzinfo is None:
+            next_funding = next_funding.tz_localize("UTC")
+        while candle_time >= next_funding:
+            position["funding_paid"] = float(position["funding_paid"]) + notional * funding_rate * side
+            next_funding += pd.Timedelta(hours=8)
+        position["next_funding"] = next_funding.isoformat()
+
+        stop_hit = candle.low <= float(position["stop"]) if side == 1 else candle.high >= float(position["stop"])
+        target_hit = candle.high >= float(position["target"]) if side == 1 else candle.low <= float(position["target"])
+        if stop_hit or target_hit:
+            raw_exit = float(position["stop"]) if stop_hit else float(position["target"])
+            exit_price = raw_exit * (1 - slippage * side)
+            qty = float(position["qty"])
+            gross = (exit_price - float(position["entry"])) * qty * side
+            fees = (float(position["entry"]) + exit_price) * qty * fee
+            funding_paid = float(position["funding_paid"])
+            net = gross - fees - funding_paid
+            cash += net
+            trade = {
+                "entry_time": position["entry_time"],
+                "exit_time": candle_time.isoformat(),
+                "side": "LONG" if side == 1 else "SHORT",
+                "entry": position["entry"],
+                "exit": exit_price,
+                "margin_usdt": margin,
+                "notional_usdt": notional,
+                "leverage": leverage,
+                "stop_atr": position["stop_atr"],
+                "target_R": position["target_R"],
+                "funding_paid_usdt": funding_paid,
+                "net_pnl_usdt": net,
+                "reason": "STOP_LOSS" if stop_hit else "TAKE_PROFIT",
+                "mode": "PAPER_ONLY",
+            }
+            append_csv_row(args.paper_trades, trade)
+            event_message = (
+                f"BTC 5M PAPER EXIT {'LONG' if side == 1 else 'SHORT'}\n"
+                f"Exit: {exit_price:.2f}\n"
+                f"Net P&L: {net:+.2f} USDT\n"
+                f"Balance: {cash:.2f} USDT\n"
+                f"Reason: {trade['reason']}"
+            )
+            position = None
+        else:
+            state["position"] = position
+
+    if position is None and not had_position_at_start and cash >= margin:
+        side = 1 if bool(long_signal[-1]) else (-1 if bool(short_signal[-1]) else 0)
+        atr = float(candle.atr)
+        if side and np.isfinite(atr) and atr > 0:
+            stop_multiple, reward_multiple = (3.0, 3.0) if side == 1 else (2.5, 2.0)
+            reference = float(candle.close)
+            entry = reference * (1 + slippage * side)
+            stop_distance = stop_multiple * atr
+            liquidation_distance = (1 / leverage) - args.maintenance_margin_rate
+            if stop_distance / entry < liquidation_distance * 0.75:
+                qty = notional / entry
+                position = {
+                    "side": side,
+                    "entry": entry,
+                    "stop": entry - side * stop_distance,
+                    "target": entry + side * stop_distance * reward_multiple,
+                    "qty": qty,
+                    "entry_time": candle_time.isoformat(),
+                    "next_funding": (candle_time.floor("8h") + pd.Timedelta(hours=8)).isoformat(),
+                    "funding_paid": 0.0,
+                    "stop_atr": stop_multiple,
+                    "target_R": reward_multiple,
+                }
+                event_message = (
+                    f"BTC 5M PAPER {'BUY / LONG' if side == 1 else 'SELL / SHORT'}\n"
+                    f"Entry: {entry:.2f}\n"
+                    f"Stop Loss: {position['stop']:.2f}\n"
+                    f"Target: {position['target']:.2f}\n"
+                    f"Margin: {margin:.2f} USDT | Leverage: {leverage:g}x\n"
+                    f"Notional: {notional:.2f} USDT\n"
+                    f"Signal candle: {candle_time.isoformat()}\n"
+                    "PAPER ONLY — no exchange order sent."
+                )
+            else:
+                print("Signal skipped: stop is too close to approximate liquidation distance.")
+
+    unrealized = 0.0
+    if position is not None:
+        side = int(position["side"])
+        mark = float(candle.close)
+        unrealized = (
+            (mark - float(position["entry"])) * float(position["qty"]) * side
+            - (float(position["entry"]) + mark) * float(position["qty"]) * fee
+            - float(position["funding_paid"])
+        )
+
+    state["cash"] = cash
+    state["position"] = position
+    state["last_processed_candle"] = candle_key
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = state_path.with_suffix(state_path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    temp_path.replace(state_path)
+
+    append_csv_row(args.paper_equity, {
+        "time": candle_key,
+        "realized_balance_usdt": cash,
+        "unrealized_pnl_usdt": unrealized,
+        "equity_usdt": cash + unrealized,
+        "position": ("LONG" if position["side"] == 1 else "SHORT") if position else "FLAT",
+    })
+    print(
+        f"BTC PAPER | {candle_key} | balance={cash:.2f} | "
+        f"unrealized={unrealized:+.2f} | equity={cash + unrealized:.2f} | "
+        f"position={('LONG' if position['side'] == 1 else 'SHORT') if position else 'FLAT'}"
+    )
+    if event_message:
+        send_paper_telegram(event_message)
+
+
+def run_paper(args):
+    print("BTC 5M DUAL PULLBACK PAPER MODE — NO LIVE ORDERS")
+    print("State and CSV files are stored locally. Press Ctrl+C to stop.")
+    while True:
+        try:
+            run_paper_cycle(args)
+        except KeyboardInterrupt:
+            print("Paper scanner stopped by user.")
+            break
+        except Exception as exc:
+            print(f"Paper cycle error: {exc}")
+        if not args.loop:
+            break
+        wait_seconds = max(2, 300 - (time.time() % 300) + 2)
+        time.sleep(wait_seconds)
+
+
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("backtest", "paper"), default="backtest")
+    parser.add_argument("--loop", action="store_true", help="keep paper scanner running every 5 minutes")
+    parser.add_argument("--paper-state", default="BTC_DUAL_PULLBACK_PAPER_STATE.json")
+    parser.add_argument("--paper-trades", default="BTC_DUAL_PULLBACK_PAPER_TRADES.csv")
+    parser.add_argument("--paper-equity", default="BTC_DUAL_PULLBACK_PAPER_EQUITY.csv")
     parser.add_argument("--days", type=int, default=365)
     parser.add_argument("--capital", type=float, default=1000)
     parser.add_argument("--margin", type=float, default=100)
@@ -310,6 +524,10 @@ def main():
     if (args.days < 3 or args.capital <= 0 or args.margin <= 0 or args.leverage <= 0
             or args.fee < 0 or args.slippage < 0 or args.funding_rate < 0):
         parser.error("Invalid days/capital/margin/leverage/cost parameters")
+
+    if args.mode == "paper":
+        run_paper(args)
+        return
 
     output = Path(args.out)
     output.mkdir(parents=True, exist_ok=True)
