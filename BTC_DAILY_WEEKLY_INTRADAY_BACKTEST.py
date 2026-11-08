@@ -19,6 +19,55 @@ def fill_price(price, side, action):
     buy = (side == "LONG" and action == "ENTRY") or (side == "SHORT" and action == "EXIT")
     return price * (1 + SLIPPAGE if buy else 1 - SLIPPAGE)
 
+def condition_diagnostics(x):
+    """Count each original setup condition independently and cumulatively; does not alter signals."""
+    counts = {"shared_gate_candidates": 0, "setups": {}}
+    names = {
+      "WEEKLY_VWAP_RECLAIM": ["prev_below_prev_daily_close","prev_below_weekly_vwap","prev_below_bb_mid","close_above_weekly_vwap","bull_strong","macd_above_signal","macd_hist_positive","rsi_above_57","ema9_above_ema21","volume_spike","all_setup_conditions"],
+      "BB_MIDDLE_WEEKLY_TOUCH": ["close_above_bb_mid","bull_marubozu","weekly_touch","macd_above_signal","macd_hist_positive","rsi_above_57","ema9_above_ema21","volume_spike","all_setup_conditions"],
+      "WEEKLY_HIGH_EXHAUSTION": ["rising_highs_4","prior_breakout","high_above_prev_week_high","close_below_prev_week_high","bear_strong","rsi_prev_above_70_falling","macd_bear_turn","macd_hist_negative","opening_green_strong","volume_spike","all_setup_conditions"],
+      "BB_MIDDLE_REJECTION": ["bb_touches_12_between_2_3","high_near_bb_mid","close_below_bb_mid","bear_strong","macd_below_signal","macd_hist_negative","rsi_between_45_52","rsi_falling","volume_spike","all_setup_conditions"]
+    }
+    counts["setups"] = {k: {"conditions": {n: 0 for n in v}} for k,v in names.items()}
+    for i in range(300, len(x)):
+        b=x.iloc[i]; p=x.iloc[i-1]
+        if not bool(b.get("or_filter",False) and b.get("near_weekly_level",False) and b.get("liquid_24h",False)):
+            continue
+        counts["shared_gate_candidates"] += 1
+        # Same setup-1/2 LONG confirmation gate as detect_signal().
+        long_conf = [
+          bool(b["macd"] > b["macd_signal"]),
+          bool(b["macd_hist"] > 0),
+          bool(b["rsi"] > 57),
+          bool(b["ema9"] > b["ema21"]),
+          bool(b["volume_spike"])
+        ]
+        s1 = [
+          bool(p["close"] < b["previous_daily_close"]),
+          bool(p["close"] < p["weekly_vwap"]),
+          bool(p["close"] < p["bb_mid"]),
+          bool(b["close"] > b["weekly_vwap"]),
+          bool(b["bull_strong"]),
+          *long_conf
+        ]
+        last3=x.iloc[i-2:i+1]
+        weekly_touch=any(((last3["low"] <= level+0.25*float(b["atr"])) & (last3["high"] >= level-0.25*float(b["atr"]))).any() for level in [float(b["weekly_open"]),float(b["weekly_vwap"])])
+        s2=[bool(b["close"]>b["bb_mid"]),bool(b["bull_marubozu"]),bool(weekly_touch),*long_conf]
+        last4=x.iloc[i-3:i+1]
+        rising=all(float(last4.iloc[k]["high"])>float(last4.iloc[k-1]["high"]) for k in range(1,len(last4)))
+        breakout=(float(last4.iloc[-2]["high"])>float(b["previous_week_high"]) or float(last4.iloc[-3]["high"])>float(b["previous_week_high"]))
+        exhaustion=bool(p["rsi"]>70 and b["rsi"]<p["rsi"])
+        bear_turn=bool(b["macd_hist"]<p["macd_hist"] and b["macd"]<p["macd"])
+        s3=[bool(rising),bool(breakout),bool(b["high"]>b["previous_week_high"]),bool(b["close"]<b["previous_week_high"]),bool(b["bear_strong"]),exhaustion,bear_turn,bool(b["macd_hist"]<0),bool(b["opening_green_strong"]),bool(b["volume_spike"])]
+        s4=[bool(2<=float(b["bb_touches_12"])<=3),bool(b["high"]>=b["bb_mid"]-0.15*b["atr"]),bool(b["close"]<b["bb_mid"]),bool(b["bear_strong"]),bool(b["macd"]<b["macd_signal"]),bool(b["macd_hist"]<0),bool(45<=b["rsi"]<=52),bool(b["rsi"]<p["rsi"]),bool(b["volume_spike"])]
+        for setup, vals in zip(names,[s1,s2,s3,s4]):
+            c=counts["setups"][setup]["conditions"]
+            for key,val in zip(names[setup][:-1],vals):
+                c[key]+=int(val)
+            c["all_setup_conditions"]+=int(all(vals))
+    return counts
+
+
 def main():
     raw = strat.fetch_futures_candles()
     data = strat.add_indicators(raw).reset_index(drop=True)
@@ -87,6 +136,7 @@ def main():
     df=pd.DataFrame(trades, columns=trade_columns)
     df.to_csv(OUT/"BTC_5M_backtest_trades.csv",index=False)
     pd.DataFrame(signal_rows,columns=["candle_time","side","setup","close"]).to_csv(OUT/"BTC_5M_backtest_signals.csv",index=False)
+    condition_counts = condition_diagnostics(data)
     diagnostics={
       "candles_loaded":int(len(data)),
       "candles_after_warmup":int(max(0,len(data)-300)),
@@ -94,7 +144,8 @@ def main():
       "near_weekly_level_true":int(data["near_weekly_level"].fillna(False).sum()),
       "liquid_24h_true":int(data["liquid_24h"].fillna(False).sum()),
       "shared_gate_true":int((data["or_filter"].fillna(False)&data["near_weekly_level"].fillna(False)&data["liquid_24h"].fillna(False)).sum()),
-      "signals_by_setup":setup_counts
+      "signals_by_setup":setup_counts,
+      "condition_counts_on_shared_gate_candidates":condition_counts
     }
     pd.Series(diagnostics).to_json(OUT/"BTC_5M_backtest_diagnostics.json",indent=2)
     if len(df):
