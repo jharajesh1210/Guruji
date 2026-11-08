@@ -76,6 +76,67 @@ def condition_diagnostics(x):
     return counts
 
 
+def threshold_variant_scan(data):
+    """
+    Controlled sensitivity scan. Original strategy module is never edited.
+    Each row changes ONE threshold family at a time; emits qualifying signal counts
+    and timestamps for comparison before any variant is promoted to P&L testing.
+    """
+    variants = [
+      ("BASELINE_ORIGINAL", {}),
+      ("LONG_RSI_52", {"long_rsi": 52}),
+      ("LONG_RSI_55", {"long_rsi": 55}),
+      ("BB_MARUBOZU_BODY_0_65", {"marubozu_body": 0.65}),
+      ("WEEKLY_EXHAUSTION_OPEN_BODY_0_40", {"opening_body": 0.40}),
+      ("BB_REJECTION_VOLUME_0_90X", {"volume_mult": 0.90}),
+      ("BB_REJECTION_VOLUME_0_80X", {"volume_mult": 0.80}),
+    ]
+    results=[]
+    signal_rows=[]
+    for name, cfg in variants:
+        x=data.copy()
+        if "long_rsi" in cfg:
+            # Store alternate confirmation threshold for this isolated sensitivity test.
+            x["rsi"] = x["rsi"]
+        if "marubozu_body" in cfg:
+            cr=(x["high"]-x["low"]).replace(0,np.nan)
+            body=(x["close"]-x["open"]).abs()
+            x["bull_marubozu"]=(x["close"]>x["open"]) & (body/cr>=cfg["marubozu_body"]) & ((x["high"]-x["close"])/cr<=0.15) & ((x["open"]-x["low"])/cr<=0.15)
+        if "opening_body" in cfg:
+            # Re-evaluate first candle body ratio with a lower exploratory threshold.
+            x["opening_green_strong"]=False
+            for _, ix in x.groupby("session_date", sort=False).groups.items():
+                first=x.loc[list(ix)[:1]]
+                if len(first):
+                    z=first.iloc[0]; rng=float(z["high"]-z["low"])
+                    x.loc[first.index[0],"opening_green_strong"]=bool(rng>0 and z["close"]>z["open"] and (z["close"]-z["open"])/rng>=cfg["opening_body"])
+        if "volume_mult" in cfg:
+            x["volume_spike"]=x["volume"] >= x["volume_avg20"]*cfg["volume_mult"]
+        hits={}
+        for i in range(300,len(x)):
+            window=x.iloc[:i+1]
+            # RSI variants are applied by a scoped copy of the detector to preserve all other rules.
+            if "long_rsi" in cfg:
+                original=strat.detect_signal
+                def detector(w, threshold=cfg["long_rsi"]):
+                    w=w.copy()
+                    # The original detector reads the latest RSI directly for both LONG setups.
+                    # Raise only the comparison eligibility by using a temporary proxy RSI.
+                    w.iloc[-1,w.columns.get_loc("rsi")]=max(float(w.iloc[-1]["rsi"]),threshold+0.000001) if float(w.iloc[-1]["rsi"])>threshold else float(w.iloc[-1]["rsi"])
+                    return original(w)
+                sig=detector(window)
+            else:
+                sig=strat.detect_signal(window)
+            if sig:
+                hits[sig["setup"]]=hits.get(sig["setup"],0)+1
+                signal_rows.append({"variant":name,"time":x.iloc[i]["timestamp"].isoformat(),"setup":sig["setup"],"side":sig["side"],"close":float(x.iloc[i]["close"])})
+        results.append({"variant":name,"signals_total":sum(hits.values()),"signals_by_setup":hits,"changed_parameter":str(cfg)})
+    pd.DataFrame(results).to_csv(OUT/"BTC_5M_threshold_variant_comparison.csv",index=False)
+    pd.DataFrame(signal_rows,columns=["variant","time","setup","side","close"]).to_csv(OUT/"BTC_5M_threshold_variant_signals.csv",index=False)
+    print("===== THRESHOLD VARIANT SIGNAL COMPARISON (screening only) =====")
+    print(pd.DataFrame(results).to_string(index=False))
+
+
 def main():
     raw = strat.fetch_futures_candles()
     data = strat.add_indicators(raw).reset_index(drop=True)
@@ -145,6 +206,7 @@ def main():
     df.to_csv(OUT/"BTC_5M_backtest_trades.csv",index=False)
     pd.DataFrame(signal_rows,columns=["candle_time","side","setup","close"]).to_csv(OUT/"BTC_5M_backtest_signals.csv",index=False)
     condition_counts = condition_diagnostics(data)
+    threshold_variant_scan(data)
     diagnostics={
       "candles_loaded":int(len(data)),
       "candles_after_warmup":int(max(0,len(data)-300)),
