@@ -1,4 +1,4 @@
-name: BTC + GOLD 365D 5M LEVERAGED PAPER BACKTEST
+name: BTC Donchian 365D 5M 30X PAPER BACKTEST
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  backtest:
+  btc-backtest:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -23,24 +23,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pandas numpy requests
-      - name: Compile scripts
+      - name: Compile existing BTC script
+        run: python -m py_compile BTC_FUTURES_DONCHIAN_BACKTEST_30X.py
+      - name: Run BTC Donchian 20/55 ATR 2/3 with 30X risk model
         run: |
-          python -m py_compile BTC_FUTURES_DONCHIAN_BACKTEST_30X.py GOLD_PRO_FINAL_30X.py
-      - name: Run BTC Donchian 20/55 ATR 2/3
-        run: |
-          python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --days 365 --capital 1000 --margin 100 --leverage 30 --out BTC_DONCHIAN_30X_RESULTS | tee BTC_BACKTEST_LOG.txt
-      - name: Run GOLD SMC XAUUSDT + PAXGUSDT
-        run: |
-          python -u GOLD_PRO_FINAL_30X.py --backtest 365 --out GOLD_SMC_30X_RESULTS | tee GOLD_BACKTEST_LOG.txt
-      - name: Upload results
+          python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --days 365 --capital 1000 --margin 100 --leverage 30 --funding-rate 0.0001 --maintenance-margin-rate 0.005 --out BTC_DONCHIAN_30X_RESULTS | tee BTC_BACKTEST_LOG.txt
+      - name: Upload BTC results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: BTC_GOLD_365D_30X_PAPER_BACKTEST
+          name: BTC_DONCHIAN_365D_30X_RETEST
           path: |
             BTC_BACKTEST_LOG.txt
-            GOLD_BACKTEST_LOG.txt
             BTC_DONCHIAN_30X_RESULTS/
-            GOLD_SMC_30X_RESULTS/
           if-no-files-found: warn
           retention-days: 30
