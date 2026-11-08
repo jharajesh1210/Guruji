@@ -1,5 +1,4 @@
-name: BTC Donchian 365D 5M 30X PAPER BACKTEST
-# Re-run with full-margin-only account stop guard
+name: BTC Dual LONG-SHORT Pullback 365D 5M 30X PAPER BACKTEST
 
 on:
   push:
@@ -26,16 +25,16 @@ jobs:
           python -m pip install pandas numpy requests
       - name: Compile existing BTC script
         run: python -m py_compile BTC_FUTURES_DONCHIAN_BACKTEST_30X.py
-      - name: Run BTC Donchian 20/55 ATR 2/3 with 30X risk model
+      - name: Run BTC dual LONG-SHORT pullback backtest
         run: |
-          python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --days 365 --capital 1000 --margin 100 --leverage 30 --funding-rate 0.0001 --maintenance-margin-rate 0.005 --out BTC_DONCHIAN_30X_RESULTS | tee BTC_BACKTEST_LOG.txt
+          python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --days 365 --capital 1000 --margin 100 --leverage 30 --funding-rate 0.0001 --maintenance-margin-rate 0.005 --out BTC_DUAL_PULLBACK_RESULTS | tee BTC_BACKTEST_LOG.txt
       - name: Upload BTC results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: BTC_DONCHIAN_365D_30X_RETEST
+          name: BTC_DUAL_PULLBACK_365D_30X
           path: |
             BTC_BACKTEST_LOG.txt
-            BTC_DONCHIAN_30X_RESULTS/
+            BTC_DUAL_PULLBACK_RESULTS/
           if-no-files-found: warn
           retention-days: 30
