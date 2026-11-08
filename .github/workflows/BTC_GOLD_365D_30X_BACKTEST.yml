@@ -28,8 +28,8 @@ jobs:
       - name: Send Telegram connectivity test (manual runs only)
         if: github.event_name == 'workflow_dispatch'
         env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
             echo "::error::GitHub Secrets TG_TOKEN and TG_CHAT_ID must both be configured."
