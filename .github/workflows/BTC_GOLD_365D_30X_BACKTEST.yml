@@ -57,17 +57,3 @@ jobs:
             echo "No paper state changes to persist."
           fi
 
-      - name: Run BTC dual LONG-SHORT pullback backtest
-        if: github.event_name != 'workflow_dispatch'
-        run: |
-          python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --days 365 --capital 1000 --margin 100 --leverage 30 --funding-rate 0.0001 --maintenance-margin-rate 0.005 --out BTC_DUAL_PULLBACK_RESULTS | tee BTC_BACKTEST_LOG.txt
-      - name: Upload BTC results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: BTC_DUAL_PULLBACK_365D_30X
-          path: |
-            BTC_BACKTEST_LOG.txt
-            BTC_DUAL_PULLBACK_RESULTS/
-          if-no-files-found: warn
-          retention-days: 30
