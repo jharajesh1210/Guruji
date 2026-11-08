@@ -42,18 +42,14 @@ jobs:
         env:
           DAYS: ${{ inputs.days || '365' }}
           NOTIONAL: ${{ inputs.notional || '100' }}
-        run: |
-          python BTC_FUTURES_DONCHIAN_BACKTEST.py \\
-            --days "$DAYS" --capital 1000 --notional "$NOTIONAL" \\
-            --fee 0.0005 --slippage 0.0002 --out btc_donchian_results
+        run: python BTC_FUTURES_DONCHIAN_BACKTEST.py --days "$DAYS" --capital 1000 --notional "$NOTIONAL" --fee 0.0005 --slippage 0.0002 --out btc_donchian_results
       - name: Add comparison to run summary
         if: always()
         run: |
           if [ -f btc_donchian_results/comparison.csv ]; then
             echo '### BTC Donchian backtest comparison' >> "$GITHUB_STEP_SUMMARY"
-            echo ' `' >> "$GITHUB_STEP_SUMMARY"
+            echo 'CSV comparison:' >> "$GITHUB_STEP_SUMMARY"
             cat btc_donchian_results/comparison.csv >> "$GITHUB_STEP_SUMMARY"
-            echo ' `' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload backtest reports
         if: always()
