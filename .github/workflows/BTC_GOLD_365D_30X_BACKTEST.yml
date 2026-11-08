@@ -1,6 +1,8 @@
 name: BTC + GOLD 365D 5M LEVERAGED PAPER BACKTEST
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
