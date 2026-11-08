@@ -1,0 +1,44 @@
+name: BTC + GOLD 365D 5M LEVERAGED PAPER BACKTEST
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas numpy requests
+      - name: Compile scripts
+        run: |
+          python -m py_compile BTC_FUTURES_DONCHIAN_BACKTEST_30X.py GOLD_PRO_FINAL_30X.py
+      - name: Run BTC Donchian 20/55 ATR 2/3
+        run: |
+          python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --days 365 --capital 1000 --margin 100 --leverage 30 --out BTC_DONCHIAN_30X_RESULTS | tee BTC_BACKTEST_LOG.txt
+      - name: Run GOLD SMC XAUUSDT + PAXGUSDT
+        run: |
+          python -u GOLD_PRO_FINAL_30X.py --backtest 365 --out GOLD_SMC_30X_RESULTS | tee GOLD_BACKTEST_LOG.txt
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTC_GOLD_365D_30X_PAPER_BACKTEST
+          path: |
+            BTC_BACKTEST_LOG.txt
+            GOLD_BACKTEST_LOG.txt
+            BTC_DONCHIAN_30X_RESULTS/
+            GOLD_SMC_30X_RESULTS/
+          if-no-files-found: warn
+          retention-days: 30
