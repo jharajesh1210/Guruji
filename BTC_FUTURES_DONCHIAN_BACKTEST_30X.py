@@ -528,8 +528,8 @@ def main():
         if not token or not chat_id:
             parser.error("--test-telegram requires TG_TOKEN and TG_CHAT_ID environment variables")
         send_paper_telegram(
-            "✅ BTC 5M PAPER SCANNER — TELEGRAM TEST SUCCESSFUL\\n"
-            "Telegram connection is working.\\n"
+            "✅ BTC 5M PAPER SCANNER — TELEGRAM TEST SUCCESSFUL\n"
+            "Telegram connection is working.\n"
             "Mode: PAPER ONLY — no exchange order sent."
         )
         return
