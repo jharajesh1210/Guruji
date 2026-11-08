@@ -1,0 +1,2 @@
+entry_time,exit_time,side,setup,entry,exit,qty,notional_usdt,initial_sl,exit_reason,pnl_usdt,best_r
+2026-11-08T05:45:00+00:00,2026-11-08T12:15:00+00:00,SHORT,SELL,75772.2,75877.3,0.0013197452363795693,100.0,75877.3,INITIAL_SL,-0.138705,0
