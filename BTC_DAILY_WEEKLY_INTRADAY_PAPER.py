@@ -743,6 +743,11 @@ def main() -> None:
         except Exception:
             log.exception("Scanner cycle failed; next cycle will retry.")
 
+        # GitHub Actions scheduled runs are one-shot; local laptop mode keeps polling.
+        if os.getenv("SCAN_ONCE", "0").strip().lower() in ("1", "true", "yes"):
+            log.info("One-shot scan finished. Exiting normally for GitHub Actions.")
+            break
+
         elapsed = time.time() - cycle_started
         sleep_for = max(5, POLL_SECONDS - int(elapsed))
         if not STOP_REQUESTED:
