@@ -184,7 +184,12 @@ def simulate(d, capital, margin, leverage, fee, slip, atrmult,
                 candidate = bar.close - side * atrmult * bar.atr
                 pos["stop"] = max(pos["stop"], candidate) if side == 1 else min(pos["stop"], candidate)
 
-        if pos is None and not closed_this_bar and cash > 0:
+        # Do not keep trading with fractional dust margin after the account
+        # can no longer fund the requested 100 USDT isolated-margin trade.
+        if pos is None and cash < margin:
+            break
+
+        if pos is None and not closed_this_bar and cash >= margin:
             # Original Donchian/EMA entry conditions are preserved exactly.
             side = (
                 1 if bar.close > bar.upper and bar.close > bar.ema200
@@ -192,7 +197,7 @@ def simulate(d, capital, margin, leverage, fee, slip, atrmult,
             )
             if side:
                 entry = nxt.open * (1 + side * slip)
-                used_margin = min(float(margin), cash)
+                used_margin = float(margin)
                 notional = used_margin * leverage
                 qty = notional / entry
                 entry_time = d.index[i + 1]
