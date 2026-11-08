@@ -23,6 +23,8 @@ def main():
     raw = strat.fetch_futures_candles()
     data = strat.add_indicators(raw).reset_index(drop=True)
     trades, events = [], []
+    signal_rows = []
+    setup_counts = {}
     pos = None
     for i in range(300, len(data)):
         bar = data.iloc[i]
@@ -65,6 +67,8 @@ def main():
             sig = strat.detect_signal(data.iloc[:i+1])
             if sig:
                 side=sig["side"]; setup=sig["setup"]
+                setup_counts[setup] = setup_counts.get(setup, 0) + 1
+                signal_rows.append({"candle_time":stamp,"side":side,"setup":setup,"close":float(bar.close)})
                 raw_entry=float(bar.close)
                 entry=fill_price(raw_entry,side,"ENTRY")
                 stop=strat.make_stop(side,raw_entry,bar)
@@ -79,8 +83,20 @@ def main():
         qty=pos["qty"]; gross=strat.paper_pnl(side,pos["entry"],exit_px,qty)
         fees=(pos["entry"]*qty+exit_px*qty)*FEE_RATE; pnl=gross-fees
         trades.append({**pos["row"],"exit_time":bar.timestamp.isoformat(),"exit_price":exit_px,"exit_reason":"END_OF_DATA_MARK_TO_MARK","gross_pnl":gross,"fees":fees,"net_pnl":pnl,"r_multiple":pnl/(CAPITAL*pos["risk"]/pos["entry"])})
-    df=pd.DataFrame(trades)
+    trade_columns=["entry_time","side","setup","entry_price","initial_stop","quantity","notional_usdt","exit_time","exit_price","exit_reason","gross_pnl","fees","net_pnl","r_multiple"]
+    df=pd.DataFrame(trades, columns=trade_columns)
     df.to_csv(OUT/"BTC_5M_backtest_trades.csv",index=False)
+    pd.DataFrame(signal_rows,columns=["candle_time","side","setup","close"]).to_csv(OUT/"BTC_5M_backtest_signals.csv",index=False)
+    diagnostics={
+      "candles_loaded":int(len(data)),
+      "candles_after_warmup":int(max(0,len(data)-300)),
+      "opening_range_filter_true":int(data["or_filter"].fillna(False).sum()),
+      "near_weekly_level_true":int(data["near_weekly_level"].fillna(False).sum()),
+      "liquid_24h_true":int(data["liquid_24h"].fillna(False).sum()),
+      "shared_gate_true":int((data["or_filter"].fillna(False)&data["near_weekly_level"].fillna(False)&data["liquid_24h"].fillna(False)).sum()),
+      "signals_by_setup":setup_counts
+    }
+    pd.Series(diagnostics).to_json(OUT/"BTC_5M_backtest_diagnostics.json",indent=2)
     if len(df):
         wins=int((df.net_pnl>0).sum()); losses=int((df.net_pnl<=0).sum())
         gross_profit=float(df.loc[df.net_pnl>0,"net_pnl"].sum()); gross_loss=float(-df.loc[df.net_pnl<0,"net_pnl"].sum())
@@ -91,7 +107,7 @@ def main():
           "fees_usdt":round(float(df.fees.sum()),4),"profit_factor":round(gross_profit/gross_loss,3) if gross_loss else None,
           "max_drawdown_usdt":round(dd,4),"fee_rate_each_side":FEE_RATE,"slippage_each_side":SLIPPAGE}
     else:
-        summary={"pair":strat.PAIR,"timeframe":"5m","candles":len(data),"trades":0,"note":"No qualifying signals in the tested period."}
+        summary={"pair":strat.PAIR,"timeframe":"5m","candles":len(data),"trades":0,"signals_detected":len(signal_rows),"note":"No completed trades. Check BTC_5M_backtest_diagnostics.json and BTC_5M_backtest_signals.csv to distinguish no signals from open trades at the end of the period."}
     pd.Series(summary).to_json(OUT/"BTC_5M_backtest_summary.json",indent=2)
     print(pd.Series(summary).to_string())
     print("Setup breakdown:")
