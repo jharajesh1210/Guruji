@@ -506,6 +506,7 @@ def run_paper(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("backtest", "paper"), default="backtest")
+    parser.add_argument("--test-telegram", action="store_true", help="send a Telegram connectivity test and exit")
     parser.add_argument("--loop", action="store_true", help="keep paper scanner running every 5 minutes")
     parser.add_argument("--paper-state", default="BTC_DUAL_PULLBACK_PAPER_STATE.json")
     parser.add_argument("--paper-trades", default="BTC_DUAL_PULLBACK_PAPER_TRADES.csv")
@@ -520,6 +521,18 @@ def main():
     parser.add_argument("--maintenance-margin-rate", type=float, default=DEFAULT_MAINTENANCE_MARGIN_RATE)
     parser.add_argument("--out", default="BTC_DUAL_PULLBACK_RESULTS")
     args = parser.parse_args()
+
+    if args.test_telegram:
+        token = os.getenv("TG_TOKEN", "").strip()
+        chat_id = os.getenv("TG_CHAT_ID", "").strip()
+        if not token or not chat_id:
+            parser.error("--test-telegram requires TG_TOKEN and TG_CHAT_ID environment variables")
+        send_paper_telegram(
+            "✅ BTC 5M PAPER SCANNER — TELEGRAM TEST SUCCESSFUL\\n"
+            "Telegram connection is working.\\n"
+            "Mode: PAPER ONLY — no exchange order sent."
+        )
+        return
 
     if (args.days < 3 or args.capital <= 0 or args.margin <= 0 or args.leverage <= 0
             or args.fee < 0 or args.slippage < 0 or args.funding_rate < 0):
