@@ -122,7 +122,9 @@ def threshold_variant_scan(data):
                     w=w.copy()
                     # The original detector reads the latest RSI directly for both LONG setups.
                     # Raise only the comparison eligibility by using a temporary proxy RSI.
-                    current=float(w.iloc[-1]["rsi"])\n                    if threshold < current <= 57:\n                        w.iloc[-1,w.columns.get_loc("rsi")]=57.000001
+                    current=float(w.iloc[-1]["rsi"])
+                    if threshold < current <= 57:
+                        w.iloc[-1,w.columns.get_loc("rsi")]=57.000001
                     return original(w)
                 sig=detector(window)
             else:
