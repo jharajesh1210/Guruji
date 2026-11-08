@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Historical backtest for BTC_DAILY_WEEKLY_INTRADAY_PAPER strategy."""
+import os, sys, csv
+from pathlib import Path
+import numpy as np
+import pandas as pd
+
+os.environ.setdefault("HISTORY_DAYS", "30")
+import BTC_DAILY_WEEKLY_INTRADAY_PAPER as strat
+
+FEE_RATE = float(os.getenv("FEE_RATE", "0.0005"))       # 0.05% each side
+SLIPPAGE = float(os.getenv("SLIPPAGE_RATE", "0.0002")) # 0.02% each side
+CAPITAL = float(os.getenv("CAPITAL_PER_TRADE_USDT", "100"))
+OUT = Path("backtest_results")
+OUT.mkdir(exist_ok=True)
+
+def fill_price(price, side, action):
+    # adverse execution: BUY pays up, SELL receives less
+    buy = (side == "LONG" and action == "ENTRY") or (side == "SHORT" and action == "EXIT")
+    return price * (1 + SLIPPAGE if buy else 1 - SLIPPAGE)
+
+def main():
+    raw = strat.fetch_futures_candles()
+    data = strat.add_indicators(raw).reset_index(drop=True)
+    trades, events = [], []
+    pos = None
+    for i in range(300, len(data)):
+        bar = data.iloc[i]
+        stamp = bar["timestamp"].isoformat()
+        if pos:
+            side, entry, risk = pos["side"], pos["entry"], pos["risk"]
+            stop = pos["stop"]
+            hi, lo = float(bar.high), float(bar.low)
+            stop_hit = lo <= stop if side == "LONG" else hi >= stop
+            if stop_hit:
+                raw_exit = stop
+                exit_px = fill_price(raw_exit, side, "EXIT")
+                qty = pos["qty"]
+                gross = strat.paper_pnl(side, entry, exit_px, qty)
+                fees = (entry * qty + exit_px * qty) * FEE_RATE
+                pnl = gross - fees
+                trades.append({**pos["row"], "exit_time":stamp,"exit_price":exit_px,"exit_reason":"STOP_OR_LOCKED_STOP","gross_pnl":gross,"fees":fees,"net_pnl":pnl,"r_multiple":pnl/(CAPITAL*risk/entry)})
+                pos = None
+            else:
+                r4 = entry + 4*risk if side=="LONG" else entry - 4*risk
+                r2 = entry + 2*risk if side=="LONG" else entry - 2*risk
+                r3 = entry + 3*risk if side=="LONG" else entry - 3*risk
+                reached4 = hi >= r4 if side=="LONG" else lo <= r4
+                reached3 = hi >= r3 if side=="LONG" else lo <= r3
+                reached2 = hi >= r2 if side=="LONG" else lo <= r2
+                if reached4:
+                    exit_px = fill_price(r4, side, "EXIT")
+                    qty=pos["qty"]; gross=strat.paper_pnl(side,entry,exit_px,qty)
+                    fees=(entry*qty+exit_px*qty)*FEE_RATE; pnl=gross-fees
+                    trades.append({**pos["row"],"exit_time":stamp,"exit_price":exit_px,"exit_reason":"4R_FINAL_PROFIT_BOOKING","gross_pnl":gross,"fees":fees,"net_pnl":pnl,"r_multiple":pnl/(CAPITAL*risk/entry)})
+                    pos=None
+                else:
+                    if reached3:
+                        pos["stop"] = entry + 2*risk if side=="LONG" else entry - 2*risk
+                        pos["highest"]=3
+                    elif reached2 and pos["highest"] < 2:
+                        pos["stop"] = entry + risk if side=="LONG" else entry - risk
+                        pos["highest"]=2
+        if pos is None:
+            sig = strat.detect_signal(data.iloc[:i+1])
+            if sig:
+                side=sig["side"]; setup=sig["setup"]
+                raw_entry=float(bar.close)
+                entry=fill_price(raw_entry,side,"ENTRY")
+                stop=strat.make_stop(side,raw_entry,bar)
+                risk=raw_entry-stop if side=="LONG" else stop-raw_entry
+                if np.isfinite(risk) and risk>0:
+                    qty=CAPITAL/entry
+                    pos={"side":side,"setup":setup,"entry":entry,"stop":stop,"risk":risk,"qty":qty,"highest":0,
+                         "row":{"entry_time":stamp,"side":side,"setup":setup,"entry_price":entry,"initial_stop":stop,"quantity":qty,"notional_usdt":CAPITAL}}
+    # Mark any open trade at final candle close, explicitly not a strategy exit.
+    if pos:
+        bar=data.iloc[-1]; side=pos["side"]; exit_px=fill_price(float(bar.close),side,"EXIT")
+        qty=pos["qty"]; gross=strat.paper_pnl(side,pos["entry"],exit_px,qty)
+        fees=(pos["entry"]*qty+exit_px*qty)*FEE_RATE; pnl=gross-fees
+        trades.append({**pos["row"],"exit_time":bar.timestamp.isoformat(),"exit_price":exit_px,"exit_reason":"END_OF_DATA_MARK_TO_MARK","gross_pnl":gross,"fees":fees,"net_pnl":pnl,"r_multiple":pnl/(CAPITAL*pos["risk"]/pos["entry"])})
+    df=pd.DataFrame(trades)
+    df.to_csv(OUT/"BTC_5M_backtest_trades.csv",index=False)
+    if len(df):
+        wins=int((df.net_pnl>0).sum()); losses=int((df.net_pnl<=0).sum())
+        gross_profit=float(df.loc[df.net_pnl>0,"net_pnl"].sum()); gross_loss=float(-df.loc[df.net_pnl<0,"net_pnl"].sum())
+        equity=df.net_pnl.cumsum(); peak=equity.cummax(); dd=float((equity-peak).min())
+        summary={"pair":strat.PAIR,"timeframe":"5m","history_days":int(os.getenv("HISTORY_DAYS","30")),"candles":len(data),
+          "trades":len(df),"wins":wins,"losses":losses,"win_rate_pct":round(100*wins/len(df),2),
+          "net_pnl_usdt":round(float(df.net_pnl.sum()),4),"gross_pnl_usdt":round(float(df.gross_pnl.sum()),4),
+          "fees_usdt":round(float(df.fees.sum()),4),"profit_factor":round(gross_profit/gross_loss,3) if gross_loss else None,
+          "max_drawdown_usdt":round(dd,4),"fee_rate_each_side":FEE_RATE,"slippage_each_side":SLIPPAGE}
+    else:
+        summary={"pair":strat.PAIR,"timeframe":"5m","candles":len(data),"trades":0,"note":"No qualifying signals in the tested period."}
+    pd.Series(summary).to_json(OUT/"BTC_5M_backtest_summary.json",indent=2)
+    print(pd.Series(summary).to_string())
+    print("Setup breakdown:")
+    if len(df): print(df.groupby("setup").agg(trades=("net_pnl","size"),wins=("net_pnl",lambda s:int((s>0).sum())),net_pnl=("net_pnl","sum")).to_string())
+
+if __name__=="__main__": main()
