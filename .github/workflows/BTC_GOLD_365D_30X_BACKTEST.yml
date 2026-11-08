@@ -37,6 +37,7 @@ jobs:
           fi
           python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --test-telegram
       - name: Run BTC dual LONG-SHORT pullback backtest
+        if: github.event_name != 'workflow_dispatch'
         run: |
           python -u BTC_FUTURES_DONCHIAN_BACKTEST_30X.py --days 365 --capital 1000 --margin 100 --leverage 30 --funding-rate 0.0001 --maintenance-margin-rate 0.005 --out BTC_DUAL_PULLBACK_RESULTS | tee BTC_BACKTEST_LOG.txt
       - name: Upload BTC results
