@@ -16,9 +16,9 @@ Rules implemented
   SHORT (B)     : price touched PDH earlier today, then a 5m candle closes below ORB low
                   AND Nifty index below its VWAP and below day open
                   SL = max(day high so far, PDH) + small buffer
-  Target        : entry +/- RR * risk (default RR = 2.0, min allowed 1.5)
+  Target        : fixed 4R final exit; at 2R lock +2R, at 3R lock +3R.
   Skips         : news days listed in NEWS_SKIP_DATES, entries outside 9:30-14:30, risk > MAX_RISK_PCT
-  Exit          : SL / target (SL assumed first if both hit in same candle), else square-off at 15:15
+  Exit          : 2R/3R profit-lock stop, 4R final target (SL assumed first if both hit), else square-off at 15:15.
 
 NOT automated (check manually): "major S/R level close by -> skip", sector index direction,
 Gift Nifty / US sentiment, intraday news windows (only whole-day skip dates are supported).
@@ -59,7 +59,7 @@ ORB_CANDLES = 3                      # 3 x 5m = 15 min
 ENTRY_START = dt.time(9, 30)
 ENTRY_END = dt.time(14, 30)
 SQUARE_OFF = dt.time(15, 15)
-RR = 2.0                             # keep between 1.5 and 2.0
+RR = 4.0                             # fixed final target; profit locks at +2R and +3R
 MAX_RISK_PCT = 1.5                   # skip trade if SL distance > this % of entry
 SL_MODE = "orb"                      # "orb" or "vwap" (for LONG)
 SL_BUFFER_PCT = 0.05                 # small buffer beyond SL level
@@ -266,7 +266,7 @@ def check_signal(d: pd.DataFrame, i: int, pdh: float, pdl: float, prev_close: fl
         sl *= 1 - SL_BUFFER_PCT / 100
         risk = close - sl
         if 0 < risk and risk / close * 100 <= MAX_RISK_PCT:
-            return dict(side="LONG", entry=close, sl=sl, target=close + RR * risk, risk=risk)
+            return dict(side="LONG", entry=close, sl=sl, target=close + 4.0 * risk, risk=risk)
 
     # ---- Scenario B (original): SHORT trap after PDH touch, then ORB-low breakdown ----
     touched_pdh = d["high"].iloc[: i + 1].max() >= pdh * 0.999
@@ -274,7 +274,7 @@ def check_signal(d: pd.DataFrame, i: int, pdh: float, pdl: float, prev_close: fl
         sl = max(day_high, pdh) * (1 + SL_BUFFER_PCT / 100)
         risk = sl - close
         if 0 < risk and risk / close * 100 <= MAX_RISK_PCT:
-            return dict(side="SHORT", entry=close, sl=sl, target=close - RR * risk, risk=risk)
+            return dict(side="SHORT", entry=close, sl=sl, target=close - 4.0 * risk, risk=risk)
 
     # ---- Scenario C (new mirror): SHORT breakdown below ORB low + PDL ----
     if abs(gap_pct) <= GAP_LIMIT_PCT and close < min(orb_l, pdl) and st == "bear" and volume_ok:
@@ -298,6 +298,7 @@ def check_signal(d: pd.DataFrame, i: int, pdh: float, pdl: float, prev_close: fl
 def simulate_exit(d: pd.DataFrame, i: int, sig: dict) -> dict:
     side, entry, sl, tgt, risk = sig["side"], sig["entry"], sig["sl"], sig["target"], sig["risk"]
     exit_price, reason, exit_ts = None, "EOD", d.index[-1]
+    lock_stage = 0
     for j in range(i + 1, len(d)):
         b = d.iloc[j]
         if b.name.time() >= SQUARE_OFF:
@@ -305,18 +306,28 @@ def simulate_exit(d: pd.DataFrame, i: int, sig: dict) -> dict:
             break
         if side == "LONG":
             if b["low"] <= sl:
-                exit_price, reason, exit_ts = sl, "SL", b.name
+                exit_price, reason, exit_ts = sl, ("LOCK_3R" if lock_stage == 2 else "LOCK_2R" if lock_stage == 1 else "SL"), b.name
                 break
             if b["high"] >= tgt:
-                exit_price, reason, exit_ts = tgt, "TARGET", b.name
+                exit_price, reason, exit_ts = tgt, "TARGET_4R", b.name
                 break
+            favorable_r = (float(b["high"]) - entry) / risk
+            if favorable_r >= 3.0 and lock_stage < 2:
+                sl, lock_stage = entry + 3.0 * risk, 2
+            elif favorable_r >= 2.0 and lock_stage < 1:
+                sl, lock_stage = entry + 2.0 * risk, 1
         else:
             if b["high"] >= sl:
-                exit_price, reason, exit_ts = sl, "SL", b.name
+                exit_price, reason, exit_ts = sl, ("LOCK_3R" if lock_stage == 2 else "LOCK_2R" if lock_stage == 1 else "SL"), b.name
                 break
             if b["low"] <= tgt:
-                exit_price, reason, exit_ts = tgt, "TARGET", b.name
+                exit_price, reason, exit_ts = tgt, "TARGET_4R", b.name
                 break
+            favorable_r = (entry - float(b["low"])) / risk
+            if favorable_r >= 3.0 and lock_stage < 2:
+                sl, lock_stage = entry - 3.0 * risk, 2
+            elif favorable_r >= 2.0 and lock_stage < 1:
+                sl, lock_stage = entry - 2.0 * risk, 1
     if exit_price is None:
         exit_price = d["close"].iloc[-1]
     pnl = (exit_price - entry) if side == "LONG" else (entry - exit_price)
@@ -469,22 +480,31 @@ def load_paper_state(capital):
 
 def manage_paper_exit(pos, bar, candle_time, cash):
     side, sl, target = pos["side"], float(pos["sl"]), float(pos["target"])
+    entry, risk = float(pos["entry"]), float(pos["risk"])
+    lock_stage = int(pos.get("lock_stage", 0))
     reason = exit_price = None
     if side == "LONG":
         if float(bar.low) <= sl:
-            reason, exit_price = "SL", sl
+            reason, exit_price = ("LOCK_3R" if lock_stage == 2 else "LOCK_2R" if lock_stage == 1 else "SL"), sl
         elif float(bar.high) >= target:
-            reason, exit_price = "TARGET", target
+            reason, exit_price = "TARGET_4R", target
     else:
         if float(bar.high) >= sl:
-            reason, exit_price = "SL", sl
+            reason, exit_price = ("LOCK_3R" if lock_stage == 2 else "LOCK_2R" if lock_stage == 1 else "SL"), sl
         elif float(bar.low) <= target:
-            reason, exit_price = "TARGET", target
+            reason, exit_price = "TARGET_4R", target
     if reason is None and candle_time.time() >= SQUARE_OFF:
         reason, exit_price = "EOD", float(bar.close)
     if reason is None:
+        favorable_r = ((float(bar.high)-entry) if side == "LONG" else (entry-float(bar.low))) / risk
+        if favorable_r >= 3.0 and lock_stage < 2:
+            pos["sl"] = entry + 3.0*risk if side == "LONG" else entry - 3.0*risk
+            pos["lock_stage"] = 2
+        elif favorable_r >= 2.0 and lock_stage < 1:
+            pos["sl"] = entry + 2.0*risk if side == "LONG" else entry - 2.0*risk
+            pos["lock_stage"] = 1
         return None, cash
-    qty, entry = float(pos["qty"]), float(pos["entry"])
+    qty = float(pos["qty"])
     gross = (exit_price-entry)*qty if side == "LONG" else (entry-exit_price)*qty
     cost = (entry+exit_price)*qty*COST_PCT_ROUND_TRIP/100.0
     net = gross-cost
@@ -579,11 +599,11 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
                     continue
                 traded_symbols.add(sym)
                 positions[sym] = {"symbol":sym,"side":sig["side"],"entry":float(sig["entry"]),
-                    "sl":float(sig["sl"]),"target":float(sig["target"]),"qty":float(qty),
+                    "sl":float(sig["sl"]),"target":float(sig["entry"] + 4.0*float(sig["risk"]) if sig["side"] == "LONG" else sig["entry"] - 4.0*float(sig["risk"])),"risk":float(sig["risk"]),"lock_stage":0,"qty":float(qty),
                     "notional":float(notional),"entry_time":ts.isoformat()}
                 cash -= notional
                 used += notional
-                events.append(f"NIFTY50 ORB/PDH PAPER {sig['side']} — {sym}\nEntry ₹{sig['entry']:.2f}\nSL ₹{sig['sl']:.2f}\nTarget ₹{sig['target']:.2f} ({RR:g}R)\nQty {qty:.3f} | Notional ₹{notional:.2f}\nRisk budget ₹{risk_budget:.2f} | Capital ₹{capital:.2f}\nCandle {ts.isoformat()}\nPAPER ONLY — no broker order.")
+                events.append(f"NIFTY50 ORB/PDH PAPER {sig['side']} — {sym}\nEntry ₹{sig['entry']:.2f}\nSL ₹{sig['sl']:.2f}\nTarget ₹{sig['target']:.2f} (4R)\nQty {qty:.3f} | Notional ₹{notional:.2f}\nRisk budget ₹{risk_budget:.2f} | Capital ₹{capital:.2f}\nCandle {ts.isoformat()}\nPAPER ONLY — no broker order.")
                 print(f"[PAPER ENTRY] {sym} {sig['side']} qty={qty:.3f} entry={sig['entry']:.2f} SL={sig['sl']:.2f} target={sig['target']:.2f}")
                 checked += 1
             except AngelRateLimitError as exc:
@@ -621,8 +641,8 @@ if __name__ == "__main__":
     args = ap.parse_args()
     if args.rr is not None:
         RR = args.rr
-    if not 1.5 <= RR <= 2.0:
-        ap.error("RR must be between 1.5 and 2.0")
+    if args.rr is not None and float(args.rr) != 4.0:
+        ap.error("This strategy uses fixed 4R final target with 2R and 3R profit locks.")
     if args.capital <= 0:
         ap.error("Capital must be positive")
     if args.mode == "backtest":
