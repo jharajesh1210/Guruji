@@ -1,7 +1,7 @@
 """
-CoinDCX Futures ORB + PDH/PDL (Long & Short), NY session only
+CoinDCX Futures ORB + PDH/PDL (Long & Short), NY and London sessions
 -------------------------------------------------------------
-Everything is computed inside the New York session window (UTC, set below):
+Each session uses its own ORB and previous session levels. London adjusts automatically for BST/GMT:
 
 - Session        : SESSION_START .. SESSION_END (UTC). Default 13:30 - 21:00 UTC (19:00 IST onwards).
 - ORB            : first 3 five-minute candles of the session (13:30, 13:35, 13:40 UTC) -> ORB high / low.
@@ -131,6 +131,31 @@ def build_sessions(d: pd.DataFrame) -> dict:
     return out
 
 
+
+from zoneinfo import ZoneInfo
+LONDON_TZ = ZoneInfo("Europe/London")
+SESSION_CONFIG = {
+    "NY": {"tz": timezone.utc, "start": "13:30", "end": "21:00"},
+    "LONDON": {"tz": LONDON_TZ, "start": "08:00", "end": "15:30"},
+}
+
+def session_day(df, session, day):
+    cfg = SESSION_CONFIG[session]
+    local = df.index.tz_convert(cfg["tz"])
+    minutes = local.hour * 60 + local.minute
+    return df[(local.date == day) & (minutes >= _hm(cfg["start"])) & (minutes < _hm(cfg["end"]))]
+
+def complete_sessions(df, session):
+    cfg = SESSION_CONFIG[session]
+    local = df.index.tz_convert(cfg["tz"])
+    minutes = local.hour * 60 + local.minute
+    selected = df[(minutes >= _hm(cfg["start"])) & (minutes < _hm(cfg["end"]))]
+    if selected.empty:
+        return {}
+    expected = (_hm(cfg["end"]) - _hm(cfg["start"])) // CANDLE_MIN
+    return {day: group for day, group in selected.groupby(selected.index.tz_convert(cfg["tz"]).date)
+            if len(group) >= int(expected * MIN_SESSION_FILL)}
+
 def _close_trade(side, entry, risk, exit_price, entry_time, exit_time, reason):
     gross_r = ((exit_price - entry) if side == "LONG" else (entry - exit_price)) / risk
     fee_r = (2 * FEE_PCT_PER_SIDE / 100 * entry) / risk
@@ -212,20 +237,21 @@ def simulate_session(g: pd.DataFrame, pdh: float):
 def run_strategy(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     d["vol_avg"] = d["volume"].rolling(VOL_LOOKBACK, min_periods=VOL_LOOKBACK).mean().shift(1)
-
-    sessions = build_sessions(d)
-    days = sorted(sessions)
     all_trades = []
-    for k in range(1, len(days)):
-        day, prev = days[k], days[k - 1]
-        if (day - prev).days != 1:                      # need the immediately preceding session
-            continue
-        pdh = sessions[prev]["high"].max()
-        for t in simulate_session(sessions[day], pdh):
-            t["session"] = day
-            t["pdh"] = pdh
-            t["pdl"] = sessions[prev]["low"].min()
-            all_trades.append(t)
+    for session in SESSION_CONFIG:
+        sessions = complete_sessions(d, session)
+        days = sorted(sessions)
+        for k in range(1, len(days)):
+            day, prev = days[k], days[k - 1]
+            if (day - prev).days != 1:
+                continue
+            pdh = sessions[prev]["high"].max()
+            for trade in simulate_session(sessions[day], pdh):
+                trade["session"] = session
+                trade["session_date"] = str(day)
+                trade["pdh"] = pdh
+                trade["pdl"] = sessions[prev]["low"].min()
+                all_trades.append(trade)
     return pd.DataFrame(all_trades)
 
 
@@ -284,9 +310,10 @@ def save_state(state):
         json.dump(state, f, indent=2, default=str)
     pd.DataFrame(state.get("trades", [])).to_csv(TRADES_FILE, index=False)
 
-def live_process_pair(pair, state):
+def live_process_pair(pair, state, session, data=None):
     # Pull enough candles for prior-session PDH and the rolling 20-bar volume baseline.
-    data = fetch_coindcx_candles(pair=pair, interval="5", limit_days=4)
+    if data is None:
+        data = fetch_coindcx_candles(pair=pair, interval="5", limit_days=4)
     if data.empty:
         return
     d = data.copy()
@@ -294,13 +321,14 @@ def live_process_pair(pair, state):
     # For live mode, today's session is intentionally partial; only the prior
     # session must pass the original complete-session validation.
     now = datetime.now(timezone.utc)
-    today = now.date()
-    complete_prior = build_sessions(d[d.index.date < today])
+    cfg = SESSION_CONFIG[session]
+    local_now = now.astimezone(cfg["tz"])
+    today = local_now.date()
+    complete_prior = complete_sessions(d[d.index.tz_convert(cfg["tz"]).date < today], session)
     prev_days = [day for day in complete_prior if (today - day).days == 1]
     if not prev_days:
         return
-    mins = d.index.hour * 60 + d.index.minute
-    g = d[(d.index.date == today) & (mins >= S0) & (mins < S1)]
+    g = session_day(d, session, today)
     if g.empty:
         return
     prev = complete_prior[prev_days[-1]]
@@ -309,23 +337,23 @@ def live_process_pair(pair, state):
     if len(orb) < ORB_CANDLES:
         return
     orb_high, orb_low = float(orb["high"].max()), float(orb["low"].min())
-    key = pair
+    key = f"{session}:{pair}"
     pos = state["positions"].get(key)
     last_seen = state["last_bar"].get(key)
     # At/after the session close, flatten any remaining paper position at the
     # final available session candle close; do not create late entries.
-    if now.hour * 60 + now.minute >= S1:
+    if local_now.hour * 60 + local_now.minute >= _hm(cfg['end']):
         if pos is not None:
             last = g.iloc[-1]
             exit_price = float(last["close"])
             trade = _close_trade(pos["side"], float(pos["entry"]), float(pos["risk"]),
                                  exit_price, pos["t0"], g.index[-1].isoformat(), "SESSION_END")
-            trade.update({"pair": pair, "margin_usdt": MARGIN_USDT, "leverage": LEVERAGE,
+            trade.update({"pair": pair, "session": session, "margin_usdt": MARGIN_USDT, "leverage": LEVERAGE,
                           "notional_usdt": NOTIONAL_USDT,
                           "pnl_usdt_gross": trade["r_gross"] * float(pos["risk"]) * (NOTIONAL_USDT / float(pos["entry"])),
                           "pnl_usdt_net": trade["r_net"] * float(pos["risk"]) * (NOTIONAL_USDT / float(pos["entry"]))})
             state["trades"].append(trade)
-            send_telegram(f"COINDCX {pos['side']} PAPER EXIT\\n{pair}\\nExit: {exit_price}\\nReason: SESSION_END\\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
+            send_telegram(f"COINDCX {session} {pos['side']} PAPER EXIT\\n{pair}\\nExit: {exit_price}\\nReason: SESSION_END\\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
             state["positions"].pop(key, None)
         return
     # Process only fully closed 5-minute bars, and never replay a bar after an Actions rerun.
@@ -336,7 +364,7 @@ def live_process_pair(pair, state):
         stamp = ts.isoformat()
         if last_seen and stamp <= last_seen:
             continue
-        if ts.date() != today or ts.hour * 60 + ts.minute < S0 + ORB_CANDLES * CANDLE_MIN:
+        if ts.tz_convert(cfg['tz']).date() != today or (ts.tz_convert(cfg['tz']).hour * 60 + ts.tz_convert(cfg['tz']).minute) < _hm(cfg['start']) + ORB_CANDLES * CANDLE_MIN:
             state["last_bar"][key] = stamp
             last_seen = stamp
             continue
@@ -368,10 +396,10 @@ def live_process_pair(pair, state):
                            "tp": float(c + TARGET_R*risk if side == "LONG" else c-TARGET_R*risk),
                            "t0": stamp, "entry_bar": stamp, "pdh": pdh, "orb_high": orb_high,
                            "orb_low": orb_low, "margin": MARGIN_USDT, "leverage": LEVERAGE,
-                           "notional": NOTIONAL_USDT}
+                           "notional": NOTIONAL_USDT, "session": session}
                     state["positions"][key] = pos
                     qty = NOTIONAL_USDT / c
-                    send_telegram(f"COINDCX ORB {side} PAPER\n{pair}\nEntry: {c}\nSL: {sl}\nTP: {pos['tp']}\nMargin: {MARGIN_USDT} USDT | Leverage: {LEVERAGE}x | Notional: {NOTIONAL_USDT} USDT\nQty: {qty:.8f}")
+                    send_telegram(f"COINDCX {session} ORB {side} PAPER\n{pair}\nEntry: {c}\nSL: {sl}\nTP: {pos['tp']}\nMargin: {MARGIN_USDT} USDT | Leverage: {LEVERAGE}x | Notional: {NOTIONAL_USDT} USDT\nQty: {qty:.8f}")
             state["last_bar"][key] = stamp
             last_seen = stamp
             continue
@@ -384,12 +412,12 @@ def live_process_pair(pair, state):
             exit_price = sl if hit_sl else tp
             reason = "TARGET_4R" if not hit_sl else ("BREAKEVEN" if sl == entry else ("LOCKED_PROFIT" if ((sl > entry) if is_long else (sl < entry)) else "SL"))
             trade = _close_trade(side, entry, risk, exit_price, pos["t0"], stamp, reason)
-            trade.update({"pair": pair, "margin_usdt": MARGIN_USDT, "leverage": LEVERAGE,
+            trade.update({"pair": pair, "session": session, "margin_usdt": MARGIN_USDT, "leverage": LEVERAGE,
                           "notional_usdt": NOTIONAL_USDT,
                           "pnl_usdt_gross": trade["r_gross"] * risk * (NOTIONAL_USDT / entry),
                           "pnl_usdt_net": trade["r_net"] * risk * (NOTIONAL_USDT / entry)})
             state["trades"].append(trade)
-            send_telegram(f"COINDCX {side} PAPER EXIT\n{pair}\nExit: {exit_price}\nReason: {reason}\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
+            send_telegram(f"COINDCX {session} {side} PAPER EXIT\n{pair}\nExit: {exit_price}\nReason: {reason}\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
             pos = None
             state["positions"].pop(key, None)
         else:
@@ -415,7 +443,9 @@ def run_live_paper():
         pair = coin["pair"]
         print(f"[{i}/{len(universe)}] {pair}")
         try:
-            live_process_pair(pair, state)
+            data = fetch_coindcx_candles(pair=pair, interval="5", limit_days=4)
+            for session in SESSION_CONFIG:
+                live_process_pair(pair, state, session, data=data)
         except Exception as exc:
             print(f"[PAIR ERROR] {pair}: {exc}")
         time.sleep(0.25)
