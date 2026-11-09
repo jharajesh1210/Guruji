@@ -1,5 +1,6 @@
-[I 261109 04:54:36 smartConnect:124] in pool
-[warn] Nifty 50: candle API attempt 1/3 failed; retrying in 20s: Couldn't parse the JSON response received from the server: b'Access denied because of exceeding access rate'
-[warn] Nifty 50: candle API attempt 2/3 failed; retrying in 40s: Couldn't parse the JSON response received from the server: b'Access denied because of exceeding access rate'
-[warn] Nifty 50: candle API attempt 3/3 failed; retrying in 60s: Couldn't parse the JSON response received from the server: b'Access denied because of exceeding access rate'
-[DATA UNAVAILABLE] Nifty index request rate-limited: Angel One rate limit reached for Nifty 50; stopping this scan cycle.
+[I 261109 06:15:41 smartConnect:124] in pool
+[warn] ADANIENT: candle API attempt 1/3 failed; retrying in 20s: Couldn't parse the JSON response received from the server: b'Access denied because of exceeding access rate'
+[warn] ADANIENT: candle API attempt 2/3 failed; retrying in 40s: Couldn't parse the JSON response received from the server: b'Access denied because of exceeding access rate'
+[warn] ADANIENT: candle API attempt 3/3 failed; retrying in 60s: Couldn't parse the JSON response received from the server: b'Access denied because of exceeding access rate'
+[DATA UNAVAILABLE] Angel One rate limit reached for ADANIENT; stopping this scan cycle. Remaining symbols deferred to the next scheduled cycle.
+PAPER STATUS | capital ₹50000.00 | cash ₹50000.00 | reserved ₹0.00 | open positions 0
