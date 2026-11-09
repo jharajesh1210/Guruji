@@ -16,7 +16,7 @@ concurrency:
 jobs:
   paper-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v4
