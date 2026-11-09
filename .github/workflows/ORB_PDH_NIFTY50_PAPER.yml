@@ -2,6 +2,8 @@ name: NIFTY50 ORB PDH PDL 5M PAPER
 
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types: [external-schedule]
   schedule:
     - cron: '*/5 3-10 * * 1-5'
 
@@ -39,7 +41,7 @@ jobs:
           test -n "$CHAT_ID" || (echo 'Missing CHAT_ID secret' && exit 1)
           python -u orb_pdh_strategy.py test-telegram --capital 50000
       - name: Run one NIFTY50 paper cycle (manual test and scheduled)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch'
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
@@ -51,7 +53,7 @@ jobs:
           set -o pipefail
           python -u orb_pdh_strategy.py paper --capital 50000 2>&1 | tee ORB_PDH_PAPER_LOG.txt
       - name: Persist paper state and records
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch')
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -65,7 +67,7 @@ jobs:
             echo 'No paper-state changes to persist.'
           fi
       - name: Upload paper logs and records
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: NIFTY50_ORB_PDH_PAPER_${{ github.run_number }}
