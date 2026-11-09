@@ -3,7 +3,7 @@ name: CoinDCX ORB PDH PDL NY Session Live Paper Trading
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "3/5 * * * *"
 
 permissions:
   contents: write
@@ -21,6 +21,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+      - name: Show workflow trigger diagnostics
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "Schedule: ${{ github.event.schedule }}"
+          echo "UTC time:"
+          date -u
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
