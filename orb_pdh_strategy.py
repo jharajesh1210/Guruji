@@ -80,10 +80,46 @@ PAPER_EQUITY_FILE = "ORB_PDH_PAPER_EQUITY.csv"
 SCRIP_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 SCRIP_MASTER_FILE = "angel_scrip_master.json"
 INDEX_TOKENS = {"Nifty 50": "99926000"}
-REQUEST_GAP_SEC = 0.4                # Angel historical API is rate limited (~3 req/sec)
+REQUEST_GAP_SEC = 1.1                # Conservative spacing for Angel historical candle requests
 
 _api = None
 _tokens = None
+_last_candle_request = 0.0
+
+
+class AngelRateLimitError(RuntimeError):
+    """Raised when Angel One rejects candle requests due to rate limiting."""
+
+
+def _get_candles_with_retry(api, params, symbol):
+    """Throttle every historical request and retry transient/rate-limit failures."""
+    global _last_candle_request
+    last_error = None
+    for attempt in range(4):
+        wait = REQUEST_GAP_SEC - (time.monotonic() - _last_candle_request)
+        if wait > 0:
+            time.sleep(wait)
+        _last_candle_request = time.monotonic()
+        try:
+            response = api.getCandleData(params)
+            if response and response.get("status") and response.get("data") is not None:
+                return response
+            last_error = RuntimeError(f"Angel candle API returned: {response}")
+            message = str(response).lower()
+        except Exception as exc:  # SmartAPI may raise JSONDecodeError on plain-text rate-limit replies
+            last_error = exc
+            message = str(exc).lower()
+
+        rate_limited = ("exceeding access rate" in message or "access denied" in message
+                        or "rate limit" in message or "too many request" in message)
+        delay = (5, 10, 20, 30)[attempt] if rate_limited else (2, 4, 8, 12)[attempt]
+        print(f"[warn] {symbol}: candle API attempt {attempt + 1}/4 failed; retrying in {delay}s: {last_error}")
+        time.sleep(delay)
+    if last_error and ("exceeding access rate" in str(last_error).lower()
+                       or "access denied" in str(last_error).lower()
+                       or "rate limit" in str(last_error).lower()):
+        raise AngelRateLimitError(f"Angel One rate limit reached for {symbol}; stopping this scan cycle.") from last_error
+    raise RuntimeError(f"Angel One candle request failed for {symbol}: {last_error}") from last_error
 
 
 def _login():
@@ -135,15 +171,8 @@ def _fetch(symbol: str, interval: str, days: int, chunk_days: int) -> pd.DataFra
         params = {"exchange": "NSE", "symboltoken": token, "interval": interval,
                   "fromdate": cur.strftime("%Y-%m-%d 09:15"),
                   "todate": nxt.strftime("%Y-%m-%d 15:30")}
-        for attempt in range(4):
-            res = api.getCandleData(params)
-            if res and res.get("status") and res.get("data") is not None:
-                rows.extend(res["data"])
-                break
-            time.sleep(1.0 * (attempt + 1))
-        else:
-            print(f"[warn] {symbol}: candle request failed: {res}")
-        time.sleep(REQUEST_GAP_SEC)
+        res = _get_candles_with_retry(api, params, symbol)
+        rows.extend(res["data"])
         cur = nxt
     if not rows:
         return pd.DataFrame()
@@ -536,6 +565,9 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
                 events.append(f"NIFTY50 ORB/PDH PAPER {sig['side']} — {sym}\nEntry ₹{sig['entry']:.2f}\nSL ₹{sig['sl']:.2f}\nTarget ₹{sig['target']:.2f} ({RR:g}R)\nQty {qty:.3f} | Notional ₹{notional:.2f}\nRisk budget ₹{risk_budget:.2f} | Capital ₹{capital:.2f}\nCandle {ts.isoformat()}\nPAPER ONLY — no broker order.")
                 print(f"[PAPER ENTRY] {sym} {sig['side']} qty={qty:.3f} entry={sig['entry']:.2f} SL={sig['sl']:.2f} target={sig['target']:.2f}")
                 checked += 1
+            except AngelRateLimitError as exc:
+                print(f"[STOP] {exc} Remaining symbols deferred to the next scheduled cycle.")
+                break
             except Exception as exc:
                 print(f"[data error] {sym}: {exc}")
                 continue
