@@ -497,6 +497,7 @@ def run_paper(args):
             break
         except Exception as exc:
             print(f"Paper cycle error: {exc}")
+            raise
         if not args.loop:
             break
         wait_seconds = max(2, 300 - (time.time() % 300) + 2)
