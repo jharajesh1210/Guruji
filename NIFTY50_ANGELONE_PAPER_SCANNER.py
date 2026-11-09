@@ -19,7 +19,7 @@ CFG_PATH=ROOT/"nifty50_config.json"
 NSE_URL="https://www.nseindia.com/api/market-data-pre-open?key=NIFTY"
 MASTER_URL="https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 DEFAULT={
- "mode":"PAPER","selected_sector_count":3,"top_gainers_losers_count":20,
+ "mode":"PAPER","selected_sector_count":3,"top_gainers_losers_count":5,
  "entry_start":"09:30","entry_cutoff":"14:55","square_off":"15:20",
  "poll_seconds":25,"paper_capital_per_trade":100000,
  "initial_sl_method":"SIGNAL_CANDLE_EXTREME","initial_sl_buffer_pct":0.0,
@@ -98,8 +98,6 @@ def select(pre,cfg):
  for sym,x in pre.items():
   ch=x["change_pct"]; sec=cfg["sector_map"].get(sym,"Unknown")
   if sec not in sectors: continue
-  if bias=="BUY" and not (0<ch<5): continue
-  if bias=="SELL" and not (-5<ch<0): continue
   candidates.append({**x,"sector":sec,"direction":bias})
  return bias,a,d,u,candidates,{"selected_sectors":sectors,"sector_average_change_pct":avgs}
 def rank(candidates,prices,bias,cfg):
