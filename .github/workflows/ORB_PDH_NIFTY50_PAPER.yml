@@ -3,7 +3,7 @@ name: NIFTY50 ORB PDH PDL 5M PAPER
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 3-10 * * 1-5'
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
