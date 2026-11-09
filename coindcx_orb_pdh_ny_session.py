@@ -12,7 +12,7 @@ Everything is computed inside the New York session window (UTC, set below):
                    SL = ORB low.
 - SHORT (B)      : PDH touched in session, close < ORB low, session high < PDH * 1.01, volume spike,
                    red candle, body >= 40% of range.   SL = session high so far * 1.001.
-- Stop ladder    : 2R reached -> SL to entry | 3R reached -> SL to +1.5R | 4R -> target exit.
+- Stop ladder    : 2R reached -> SL locks +2R | 3R reached -> SL locks +3R | 4R -> final target exit.
                    Each candle is checked against the SL that was in force at the START of that candle
                    (SL is checked before target); the ladder only moves for the NEXT candle.
 - Session end    : any open trade is closed at the last session candle's close.
@@ -197,9 +197,9 @@ def simulate_session(g: pd.DataFrame, pdh: float):
         r_now = ((h - entry) if long else (entry - l)) / risk
         new_sl = sl
         if r_now >= 3.0:
-            new_sl = entry + 1.5 * risk if long else entry - 1.5 * risk
+            new_sl = entry + 3.0 * risk if long else entry - 3.0 * risk
         elif r_now >= 2.0:
-            new_sl = entry
+            new_sl = entry + 2.0 * risk if long else entry - 2.0 * risk
         pos["sl"] = max(sl, new_sl) if long else min(sl, new_sl)
 
     if pos is not None:                                 # session over: flatten
@@ -396,9 +396,9 @@ def live_process_pair(pair, state):
             r_now = ((h-entry) if is_long else (entry-l)) / risk
             new_sl = sl
             if r_now >= 3.0:
-                new_sl = entry + 1.5*risk if is_long else entry - 1.5*risk
+                new_sl = entry + 3.0*risk if is_long else entry - 3.0*risk
             elif r_now >= 2.0:
-                new_sl = entry
+                new_sl = entry + 2.0*risk if is_long else entry - 2.0*risk
             pos["sl"] = max(sl, new_sl) if is_long else min(sl, new_sl)
             state["positions"][key] = pos
         state["last_bar"][key] = stamp
