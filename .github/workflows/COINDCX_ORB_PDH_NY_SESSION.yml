@@ -1,15 +1,10 @@
-name: CoinDCX ORB PDH PDL NY Session Paper Backtest
+name: CoinDCX Top Futures ORB PDH PDL NY Session Paper Backtest
 
 on:
   workflow_dispatch:
     inputs:
-      pair:
-        description: "CoinDCX futures pair (example: B-BTC_USDT)"
-        required: true
-        default: "B-BTC_USDT"
-        type: string
       days:
-        description: "Historical days to fetch"
+        description: "Historical days to fetch for each eligible coin"
         required: true
         default: "14"
         type: string
@@ -20,7 +15,7 @@ permissions:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,17 +29,18 @@ jobs:
           python -m pip install pandas numpy requests
       - name: Compile strategy
         run: python -m py_compile coindcx_orb_pdh_ny_session.py
-      - name: Run CoinDCX NY session paper backtest
+      - name: Run CoinDCX Top Futures NY session paper backtest
         env:
-          PAIR: ${{ inputs.pair }}
           DAYS: ${{ inputs.days }}
         run: |
-          python -u coindcx_orb_pdh_ny_session.py --pair "$PAIR" --days "$DAYS" --csv ny_session_trades.csv
+          python -u coindcx_orb_pdh_ny_session.py --days "$DAYS" --csv ny_session_trades.csv --universe-csv eligible_futures_universe.csv
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CoinDCX_ORB_PDH_PDL_NY_${{ github.run_number }}
-          path: ny_session_trades.csv
+          name: CoinDCX_TopFutures_ORB_PDH_PDL_NY_${{ github.run_number }}
+          path: |
+            ny_session_trades.csv
+            eligible_futures_universe.csv
           if-no-files-found: warn
           retention-days: 30
