@@ -80,7 +80,7 @@ PAPER_EQUITY_FILE = "ORB_PDH_PAPER_EQUITY.csv"
 SCRIP_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 SCRIP_MASTER_FILE = "angel_scrip_master.json"
 INDEX_TOKENS = {"Nifty 50": "99926000"}
-REQUEST_GAP_SEC = 2.0                # Conservative spacing for Angel historical candle requests
+REQUEST_GAP_SEC = 4.0                # Conservative spacing between Angel historical candle requests
 DAILY_CACHE_DIR = "angel_daily_cache"
 DAILY_CACHE_MAX_AGE_SEC = 86400
 
@@ -114,13 +114,14 @@ def _get_candles_with_retry(api, params, symbol):
 
         rate_limited = ("exceeding access rate" in message or "access denied" in message
                         or "rate limit" in message or "too many request" in message)
-        delay = (20, 40, 60)[attempt] if rate_limited else (3, 6, 12)[attempt]
+        if rate_limited:
+            # Do not hammer Angel One with repeated retries after an explicit rate-limit response.
+            raise AngelRateLimitError(
+                f"Angel One rate limit reached for {symbol}; remaining symbols deferred to next cycle."
+            ) from last_error
+        delay = (3, 6, 12)[attempt]
         print(f"[warn] {symbol}: candle API attempt {attempt + 1}/3 failed; retrying in {delay}s: {last_error}")
         time.sleep(delay)
-    if last_error and ("exceeding access rate" in str(last_error).lower()
-                       or "access denied" in str(last_error).lower()
-                       or "rate limit" in str(last_error).lower()):
-        raise AngelRateLimitError(f"Angel One rate limit reached for {symbol}; stopping this scan cycle.") from last_error
     raise RuntimeError(f"Angel One candle request failed for {symbol}: {last_error}") from last_error
 
 
@@ -522,6 +523,10 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
     if now.weekday() >= 5 or now.date().isoformat() in NEWS_SKIP_DATES:
         print("Market closed/weekend or configured news skip date; no scan.")
         return
+    # Avoid Angel One historical API calls outside the NSE cash-market session.
+    if not (dt.time(9, 15) <= now.time() <= dt.time(15, 30)):
+        print(f"Outside NSE market hours (09:15-15:30 IST); no API calls. Current time: {now:%H:%M:%S}")
+        return
     state = load_paper_state(capital)
     try:
         idx = load_intraday(INDEX_SYMBOL, 1)
@@ -579,7 +584,7 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
             if sym in positions or sym in traded_symbols or cash <= 0:
                 continue
             try:
-                intr, daily = load_intraday(sym, 5), load_daily(sym)
+                intr, daily = load_intraday(sym, 1), load_daily(sym)
                 if intr.empty or daily.empty:
                     continue
                 day = split_days(intr).get(today)
