@@ -291,20 +291,19 @@ def live_process_pair(pair, state):
         return
     d = data.copy()
     d["vol_avg"] = d["volume"].rolling(VOL_LOOKBACK, min_periods=VOL_LOOKBACK).mean().shift(1)
-    sessions = build_sessions(d)
-    days = sorted(sessions)
-    if not days:
-        return
-    today = days[-1]
-    # Only trade the current UTC session; a previous complete session is mandatory.
+    # For live mode, today's session is intentionally partial; only the prior
+    # session must pass the original complete-session validation.
     now = datetime.now(timezone.utc)
-    if now.date() != today:
-        return
-    prev_days = [day for day in days if (today - day).days == 1]
+    today = now.date()
+    complete_prior = build_sessions(d[d.index.date < today])
+    prev_days = [day for day in complete_prior if (today - day).days == 1]
     if not prev_days:
         return
-    g = sessions[today]
-    prev = sessions[prev_days[-1]]
+    mins = d.index.hour * 60 + d.index.minute
+    g = d[(d.index.date == today) & (mins >= S0) & (mins < S1)]
+    if g.empty:
+        return
+    prev = complete_prior[prev_days[-1]]
     pdh = float(prev["high"].max())
     orb = g.iloc[:ORB_CANDLES]
     if len(orb) < ORB_CANDLES:
@@ -314,7 +313,7 @@ def live_process_pair(pair, state):
     pos = state["positions"].get(key)
     last_seen = state["last_bar"].get(key)
     # Process only fully closed 5-minute bars, and never replay a bar after an Actions rerun.
-    closed = g.iloc[:-1] if now.minute % 5 != 0 or now.second < 3 else g
+    closed = g.iloc[:-1]
     if closed.empty:
         return
     for ts, bar in closed.iterrows():
