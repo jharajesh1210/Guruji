@@ -35,11 +35,11 @@ jobs:
       - name: Compile strategy
         run: python -m py_compile coindcx_orb_pdh_ny_session.py
       - name: Run CoinDCX NY session paper backtest
+        env:
+          PAIR: ${{ inputs.pair }}
+          DAYS: ${{ inputs.days }}
         run: |
-          python -u coindcx_orb_pdh_ny_session.py \
-            --pair "${{ inputs.pair }}" \
-            --days "${{ inputs.days }}" \
-            --csv ny_session_trades.csv
+          python -u coindcx_orb_pdh_ny_session.py --pair "$PAIR" --days "$DAYS" --csv ny_session_trades.csv
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
