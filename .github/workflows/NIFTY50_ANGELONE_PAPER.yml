@@ -5,6 +5,9 @@ on:
   schedule:
     # 09:25 IST, Monday-Friday. Starts the paper scanner after pre-open selection window.
     - cron: '55 3 * * 1-5'
+    # Backup starters in case GitHub skips the primary schedule. Concurrency keeps one active run;
+    # the scanner itself exits if it is started outside 09:00-15:30 IST.
+    - cron: '25,55 4-8 * * 1-5'
 
 permissions:
   contents: read

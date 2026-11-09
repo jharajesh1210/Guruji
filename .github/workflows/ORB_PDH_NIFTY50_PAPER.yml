@@ -1,12 +1,22 @@
+# Self-sustaining runner: GitHub's "*/5" schedule is unreliable (mostly never fires),
+# so one job loops internally every 5 minutes through NSE hours and chains itself if needed.
+# Market window: 09:15-15:30 IST = 03:45-10:00 UTC (Mon-Fri). Schedules below are starters/backups.
 name: NIFTY50 ORB PDH PDL 5M PAPER
 
 on:
   workflow_dispatch:
+    inputs:
+      telegram_test:
+        description: "Send a Telegram connectivity test message"
+        type: boolean
+        default: false
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "40 3 * * 1-5"
+    - cron: "*/15 4-9 * * 1-5"
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: nifty50-orb-pdh-paper
@@ -15,10 +25,12 @@ concurrency:
 jobs:
   nifty50-paper:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 355
     steps:
       - name: Checkout repository and paper state
         uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -29,8 +41,8 @@ jobs:
           python -m pip install pandas numpy requests pyotp logzero websocket-client smartapi-python
       - name: Compile strategy
         run: python -m py_compile orb_pdh_strategy.py
-      - name: Telegram connectivity test (manual runs only)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Telegram connectivity test (manual test only)
+        if: github.event_name == 'workflow_dispatch' && inputs.telegram_test == true
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -38,8 +50,7 @@ jobs:
           test -n "$BOT_TOKEN" || (echo 'Missing BOT_TOKEN secret' && exit 1)
           test -n "$CHAT_ID" || (echo 'Missing CHAT_ID secret' && exit 1)
           python -u orb_pdh_strategy.py test-telegram --capital 50000
-      - name: Run one NIFTY50 paper cycle (manual test and scheduled)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      - name: Run NIFTY50 paper loop (every 5 min through market hours)
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
@@ -48,25 +59,57 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          set -o pipefail
-          python -u orb_pdh_strategy.py paper --capital 50000 2>&1 | tee ORB_PDH_PAPER_LOG.txt
-      - name: Persist paper state and records
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-        run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          for file in ORB_PDH_PAPER_STATE.json ORB_PDH_PAPER_TRADES.csv ORB_PDH_PAPER_EQUITY.csv ORB_PDH_PAPER_LOG.txt; do
-            if [ -f "$file" ]; then git add "$file"; fi
+
+          persist() {
+            for file in ORB_PDH_PAPER_STATE.json ORB_PDH_PAPER_TRADES.csv ORB_PDH_PAPER_EQUITY.csv ORB_PDH_PAPER_LOG.txt; do
+              if [ -f "$file" ]; then git add "$file"; fi
+            done
+            if [ -d angel_daily_cache ]; then git add angel_daily_cache/*.csv 2>/dev/null || true; fi
+            if git diff --cached --quiet; then
+              return 0
+            fi
+            git commit -m 'Update NIFTY50 ORB PDH PDL paper state' || return 0
+            for attempt in 1 2 3; do
+              git pull --rebase --autostash origin main >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then
+                return 0
+              fi
+              sleep $((attempt * 3))
+            done
+            echo "WARN: could not push state this cycle; will retry next cycle."
+            return 0
+          }
+
+          MARKET_END=$(date -u -d "today 10:05" +%s)
+          CAP=$(( $(date +%s) + 19800 ))
+          END=$(( CAP < MARKET_END ? CAP : MARKET_END ))
+          cycle=0
+          while true; do
+            cycle=$((cycle + 1))
+            START=$(date +%s)
+            echo "=== cycle ${cycle} @ $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+            timeout 600 python -u orb_pdh_strategy.py paper --capital 50000 2>&1 | tee ORB_PDH_PAPER_LOG.txt
+            if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+              echo "WARN: cycle ${cycle} failed or timed out; continuing."
+            fi
+            persist
+            NOW=$(date +%s)
+            if [ "$NOW" -ge "$END" ]; then
+              break
+            fi
+            NEXT=$(( (START / 300 + 1) * 300 ))
+            if [ "$NEXT" -gt "$NOW" ]; then
+              sleep $((NEXT - NOW))
+            fi
           done
-          if [ -d angel_daily_cache ]; then git add angel_daily_cache/*.csv 2>/dev/null || true; fi
-          if ! git diff --cached --quiet; then
-            git commit -m 'Update NIFTY50 ORB PDH PDL paper state'
-            git push
-          else
-            echo 'No paper-state changes to persist.'
+          echo "Loop finished after ${cycle} cycles."
+          if [ "$(date +%s)" -lt $((MARKET_END - 600)) ]; then
+            echo "NEED_REDISPATCH=1" >> "$GITHUB_ENV"
           fi
       - name: Upload paper logs and records
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: NIFTY50_ORB_PDH_PAPER_${{ github.run_number }}
@@ -77,4 +120,10 @@ jobs:
             ORB_PDH_PAPER_TRADES.csv
             ORB_PDH_PAPER_EQUITY.csv
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 7
+      - name: Re-dispatch if market is still open
+        if: env.NEED_REDISPATCH == '1' && (success() || failure())
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run ORB_PDH_NIFTY50_PAPER.yml --repo "${{ github.repository }}" --ref main
