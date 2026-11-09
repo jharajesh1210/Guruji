@@ -80,7 +80,9 @@ PAPER_EQUITY_FILE = "ORB_PDH_PAPER_EQUITY.csv"
 SCRIP_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 SCRIP_MASTER_FILE = "angel_scrip_master.json"
 INDEX_TOKENS = {"Nifty 50": "99926000"}
-REQUEST_GAP_SEC = 1.1                # Conservative spacing for Angel historical candle requests
+REQUEST_GAP_SEC = 2.0                # Conservative spacing for Angel historical candle requests
+DAILY_CACHE_DIR = "angel_daily_cache"
+DAILY_CACHE_MAX_AGE_SEC = 86400
 
 _api = None
 _tokens = None
@@ -95,7 +97,7 @@ def _get_candles_with_retry(api, params, symbol):
     """Throttle every historical request and retry transient/rate-limit failures."""
     global _last_candle_request
     last_error = None
-    for attempt in range(4):
+    for attempt in range(3):
         wait = REQUEST_GAP_SEC - (time.monotonic() - _last_candle_request)
         if wait > 0:
             time.sleep(wait)
@@ -112,8 +114,8 @@ def _get_candles_with_retry(api, params, symbol):
 
         rate_limited = ("exceeding access rate" in message or "access denied" in message
                         or "rate limit" in message or "too many request" in message)
-        delay = (5, 10, 20, 30)[attempt] if rate_limited else (2, 4, 8, 12)[attempt]
-        print(f"[warn] {symbol}: candle API attempt {attempt + 1}/4 failed; retrying in {delay}s: {last_error}")
+        delay = (20, 40, 60)[attempt] if rate_limited else (3, 6, 12)[attempt]
+        print(f"[warn] {symbol}: candle API attempt {attempt + 1}/3 failed; retrying in {delay}s: {last_error}")
         time.sleep(delay)
     if last_error and ("exceeding access rate" in str(last_error).lower()
                        or "access denied" in str(last_error).lower()
@@ -191,7 +193,22 @@ def load_intraday(symbol: str, days: int) -> pd.DataFrame:
 
 
 def load_daily(symbol: str) -> pd.DataFrame:
-    return _fetch(symbol, "ONE_DAY", 200, chunk_days=400)
+    """Load previous-day levels from a persistent 24h cache to avoid repeated daily API calls."""
+    os.makedirs(DAILY_CACHE_DIR, exist_ok=True)
+    cache_path = os.path.join(DAILY_CACHE_DIR, f"{symbol.replace('/', '_')}.csv")
+    if os.path.exists(cache_path) and time.time() - os.path.getmtime(cache_path) < DAILY_CACHE_MAX_AGE_SEC:
+        try:
+            cached = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+            if not cached.empty:
+                cached.index = pd.DatetimeIndex(cached.index)
+                cached.index = cached.index.tz_localize(TZ) if cached.index.tz is None else cached.index.tz_convert(TZ)
+                return cached.astype(float)
+        except Exception as exc:
+            print(f"[warn] {symbol}: daily cache unreadable; refreshing: {exc}")
+    daily = _fetch(symbol, "ONE_DAY", 200, chunk_days=400)
+    if not daily.empty:
+        daily.to_csv(cache_path)
+    return daily
 
 
 def add_vwap(d: pd.DataFrame) -> pd.DataFrame:
@@ -395,7 +412,7 @@ def scan():
     found = False
     for sym in SYMBOLS:
         try:
-            intr = load_intraday(sym, 5)
+            intr = load_intraday(sym, 1)
             daily = load_daily(sym)
         except Exception:  # noqa: BLE001
             continue
@@ -486,7 +503,11 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
         print("Market closed/weekend or configured news skip date; no scan.")
         return
     state = load_paper_state(capital)
-    idx = load_intraday(INDEX_SYMBOL, 5)
+    try:
+        idx = load_intraday(INDEX_SYMBOL, 1)
+    except AngelRateLimitError as exc:
+        print(f"[DATA UNAVAILABLE] Nifty index request rate-limited: {exc}")
+        return
     idx_days = split_days(idx) if not idx.empty else {}
     today = now.date()
     idx_day = idx_days.get(today)
@@ -566,7 +587,7 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
                 print(f"[PAPER ENTRY] {sym} {sig['side']} qty={qty:.3f} entry={sig['entry']:.2f} SL={sig['sl']:.2f} target={sig['target']:.2f}")
                 checked += 1
             except AngelRateLimitError as exc:
-                print(f"[STOP] {exc} Remaining symbols deferred to the next scheduled cycle.")
+                print(f"[DATA UNAVAILABLE] {exc} Remaining symbols deferred to the next scheduled cycle.")
                 break
             except Exception as exc:
                 print(f"[data error] {sym}: {exc}")
