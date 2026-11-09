@@ -312,6 +312,22 @@ def live_process_pair(pair, state):
     key = pair
     pos = state["positions"].get(key)
     last_seen = state["last_bar"].get(key)
+    # At/after the session close, flatten any remaining paper position at the
+    # final available session candle close; do not create late entries.
+    if now.hour * 60 + now.minute >= S1:
+        if pos is not None:
+            last = g.iloc[-1]
+            exit_price = float(last["close"])
+            trade = _close_trade(pos["side"], float(pos["entry"]), float(pos["risk"]),
+                                 exit_price, pos["t0"], g.index[-1].isoformat(), "SESSION_END")
+            trade.update({"pair": pair, "margin_usdt": MARGIN_USDT, "leverage": LEVERAGE,
+                          "notional_usdt": NOTIONAL_USDT,
+                          "pnl_usdt_gross": trade["r_gross"] * float(pos["risk"]) * (NOTIONAL_USDT / float(pos["entry"])),
+                          "pnl_usdt_net": trade["r_net"] * float(pos["risk"]) * (NOTIONAL_USDT / float(pos["entry"]))})
+            state["trades"].append(trade)
+            send_telegram(f"COINDCX {pos['side']} PAPER EXIT\\n{pair}\\nExit: {exit_price}\\nReason: SESSION_END\\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
+            state["positions"].pop(key, None)
+        return
     # Process only fully closed 5-minute bars, and never replay a bar after an Actions rerun.
     closed = g.iloc[:-1]
     if closed.empty:
