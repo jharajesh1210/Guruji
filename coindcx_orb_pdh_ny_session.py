@@ -1,31 +1,42 @@
 """
-CoinDCX Futures ORB + PDH/PDL (Long & Short), London + NY sessions
--------------------------------------------------------------
-Everything is computed inside each session window (UTC, see SESSIONS). London and NY run
-separately with identical rules; London ends exactly when NY starts, so trades never overlap:
+CoinDCX Futures: ORB + PDH/PDL strategy (Long & Short), London + NY sessions
+==========================================================================
+Timeframe : 5-minute candles (default pair B-BTC_USDT)
+Sessions  : each session is computed on its own, with identical rules (times are UTC)
+              LONDON  08:00 - 13:30 UTC  (13:30 - 19:00 IST)
+              NY      13:30 - 21:00 UTC  (19:00 - 02:30 IST)
+            London ends exactly when NY starts, so trades never overlap.
 
-- Sessions       : LONDON 08:00 - 13:30 UTC (13:30 IST) and NY 13:30 - 21:00 UTC (19:00 IST).
-- ORB            : first 3 five-minute candles of the session (NY: 13:30, 13:35, 13:40 UTC) -> ORB high / low.
-                   Entries are only allowed after the ORB is complete (NY: 13:45 UTC onwards).
-- PDH / PDL      : high / low of the PREVIOUS session of the SAME name (London uses yesterday's London
-                   session, NY uses yesterday's NY session), not the 24h UTC day.
-- Volume spike   : candle volume >= 2x average of the previous 20 candles (current candle excluded).
-- LONG  (A)      : close > max(ORB high, PDH), volume spike, green candle, body >= 40% of range.
-                   SL = ORB low.
-- SHORT (B)      : PDH touched in session, close < ORB low, session high < PDH * 1.01, volume spike,
-                   red candle, body >= 40% of range.   SL = session high so far * 1.001.
-- Stop ladder    : price reaches 2R -> SL locked at +2R | reaches 3R -> SL locked at +3R | reaches 4R -> exit at 4R.
-                   So a reversal after 2R exits at +2R, after 3R exits at +3R; before 2R the original SL applies.
-                   Each candle is checked against the SL that was in force at the START of that candle
-                   (SL is checked before target); the ladder only moves for the NEXT candle. If a candle
-                   opens beyond the SL (gap), the exit is filled at that open, not at the SL price.
-- Session end    : any open trade is closed at the last session candle's close.
-- Fees           : FEE_PCT_PER_SIDE is charged on entry and exit and shown in R.
+Rules (per session)
+  ORB         : first 3 candles of the session (15 min) -> ORB high / low.
+                Entries only after the ORB is complete.
+  PDH / PDL   : high / low of the PREVIOUS session with the same name
+                (London uses yesterday's London, NY uses yesterday's NY).
+  Volume      : candle volume >= 2x the average of the previous 20 candles (current candle excluded).
+  LONG        : close > max(ORB high, PDH), green candle, body >= 40% of range, volume spike.
+                SL = ORB low.
+  SHORT       : PDH touched in session, close < ORB low, session high < PDH * 1.01,
+                red candle, body >= 40% of range, volume spike.
+                SL = session high so far * 1.001.
+  Stop ladder : price reaches 2R -> SL locked at +2R
+                price reaches 3R -> SL locked at +3R
+                price reaches 4R -> exit at 4R
+                (reversal after 3R exits at +3R, after 2R at +2R, before 2R at the original SL)
+  Execution   : entry at the signal candle's close. Every later candle is checked against the SL that
+                was in force at the START of that candle (SL before target); the ladder only moves
+                for the NEXT candle. If a candle opens beyond the SL (gap) the exit fills at that open.
+  Session end : any open trade is closed at the last session candle's close.
+  Fees        : FEE_PCT_PER_SIDE on entry and on exit, deducted in R.
 
-Sessions with missing candles (incomplete) are skipped, and so is a session whose previous
-session is missing or incomplete (no valid PDH/PDL).
+Incomplete sessions are skipped, and so is a session whose previous same-name session is missing.
 
-Research / paper-trading tool only. It places no orders.
+Usage
+  python coindcx_orb_pdh_london_ny.py                      # 14 days, London + NY
+  python coindcx_orb_pdh_london_ny.py --days 180           # long history (fetched in chunks)
+  python coindcx_orb_pdh_london_ny.py --sessions NY        # one session only
+  python coindcx_orb_pdh_london_ny.py --pair B-ETH_USDT
+
+Research / paper-trading tool only. It places no orders and is not financial advice.
 """
 
 import argparse
@@ -38,19 +49,20 @@ import requests
 URL = "https://public.coindcx.com/market_data/candlesticks"
 
 # ----------------------------- CONFIG -----------------------------
-SESSIONS = {                 # name -> (start, end) in UTC, end exclusive
-    "LONDON": ("08:00", "13:30"),   # 13:30 - 19:00 IST (London summer time opens at 07:00 UTC)
-    "NY": ("13:30", "21:00"),       # 19:00 - 02:30 IST
+SESSIONS = {                       # name -> (start, end) in UTC, end exclusive
+    "LONDON": ("08:00", "13:30"),  # London summer time opens at 07:00 UTC: change here if needed
+    "NY": ("13:30", "21:00"),
 }
 CANDLE_MIN = 5
-ORB_CANDLES = 3              # 3 x 5m = 15 min
+ORB_CANDLES = 3                    # 3 x 5m = 15 min
 VOL_MULT = 2.0
 VOL_LOOKBACK = 20
 BODY_MIN = 0.4
 TARGET_R = 4.0
+LADDER = [(3.0, 3.0), (2.0, 2.0)]  # (price reaches R, lock SL at R); highest first
 SHORT_SL_BUFFER = 0.001
-FEE_PCT_PER_SIDE = 0.05      # taker fee estimate, % of notional per side
-MIN_SESSION_FILL = 0.95      # share of expected candles a session needs to count as complete
+FEE_PCT_PER_SIDE = 0.05            # taker fee estimate, % of notional per side
+MIN_SESSION_FILL = 0.95            # share of expected candles a session needs to count as complete
 # -------------------------------------------------------------------
 
 
@@ -62,32 +74,52 @@ def _hm(text: str) -> int:
 SESSION_MINS = {name: (_hm(a), _hm(b)) for name, (a, b) in SESSIONS.items()}
 
 
-def fetch_coindcx_candles(pair="B-BTC_USDT", interval="5", limit_days=14):
-    end = int(time.time()) // 300 * 300
-    start = end - (limit_days * 86400)
-    response = requests.get(
-        URL,
-        params={"pair": pair, "from": start, "to": end, "resolution": interval, "pcode": "f"},
-        timeout=25,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if isinstance(payload, dict):
-        payload = payload.get("data", payload.get("candles", []))
+# ----------------------------- DATA -----------------------------
+def _request_candles(pair, interval, start, end, retries=3):
+    last_err = None
+    for attempt in range(retries):
+        try:
+            r = requests.get(
+                URL,
+                params={"pair": pair, "from": start, "to": end, "resolution": interval, "pcode": "f"},
+                timeout=25,
+            )
+            r.raise_for_status()
+            payload = r.json()
+            if isinstance(payload, dict):
+                payload = payload.get("data", payload.get("candles", []))
+            return payload or []
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            time.sleep(1.5 * (attempt + 1))
+    raise RuntimeError(f"CoinDCX request failed after {retries} tries: {last_err}")
 
-    frame = pd.DataFrame(payload)
-    if frame.empty:
+
+def fetch_coindcx_candles(pair="B-BTC_USDT", interval="5", days=14, chunk_days=5):
+    """Download 5m candles in chunks of `chunk_days` so long histories do not hit per-request limits."""
+    end = int(time.time()) // 300 * 300
+    cur = end - days * 86400
+    parts = []
+    while cur < end:
+        nxt = min(cur + chunk_days * 86400, end)
+        payload = _request_candles(pair, interval, cur, nxt)
+        if payload:
+            parts.append(pd.DataFrame(payload))
+        time.sleep(0.3)
+        cur = nxt
+    if not parts:
         raise RuntimeError("CoinDCX se data receive nahi hua.")
 
-    frame["time"] = pd.to_numeric(frame["time"], errors="coerce")
-    frame["time"] = pd.to_datetime(frame["time"], unit="ms", utc=True)
+    frame = pd.concat(parts, ignore_index=True)
+    frame["time"] = pd.to_datetime(pd.to_numeric(frame["time"], errors="coerce"), unit="ms", utc=True)
     for col in ("open", "high", "low", "close", "volume"):
         frame[col] = pd.to_numeric(frame[col], errors="coerce")
-
+    frame = frame[["time", "open", "high", "low", "close", "volume"]]
     return frame.dropna().drop_duplicates("time").sort_values("time").set_index("time")
 
 
-def build_sessions(d: pd.DataFrame, name: str = "NY") -> dict:
+# ----------------------------- STRATEGY -----------------------------
+def build_sessions(d: pd.DataFrame, name: str) -> dict:
     """UTC date -> candles of that day's session `name`. Incomplete sessions are dropped."""
     s0, s1 = SESSION_MINS[name]
     mins = d.index.hour * 60 + d.index.minute
@@ -111,6 +143,7 @@ def _close_trade(side, entry, risk, exit_price, entry_time, exit_time, reason):
 
 
 def simulate_session(g: pd.DataFrame, pdh: float):
+    """Run one session. `g` needs open/high/low/close/volume and a vol_avg column."""
     orb = g.iloc[:ORB_CANDLES]
     orb_high, orb_low = orb["high"].max(), orb["low"].min()
     run_high = g["high"].cummax().values
@@ -120,6 +153,7 @@ def simulate_session(g: pd.DataFrame, pdh: float):
         bar, ts = g.iloc[i], g.index[i]
         o, h, l, c, v = bar["open"], bar["high"], bar["low"], bar["close"], bar["volume"]
 
+        # ---------- looking for an entry ----------
         if pos is None:
             rng = h - l
             strong = rng > 0 and abs(c - o) / rng >= BODY_MIN
@@ -129,7 +163,8 @@ def simulate_session(g: pd.DataFrame, pdh: float):
                 continue
 
             long_ok = c > max(orb_high, pdh) and c > o
-            short_ok = run_high[i] >= pdh * 0.999 and c < orb_low and run_high[i] < pdh * 1.01 and c < o
+            short_ok = (run_high[i] >= pdh * 0.999 and c < orb_low
+                        and run_high[i] < pdh * 1.01 and c < o)
 
             if long_ok:
                 sl = orb_low
@@ -143,13 +178,14 @@ def simulate_session(g: pd.DataFrame, pdh: float):
                     pos = dict(side="SHORT", entry=c, sl=sl, risk=risk, tp=c - TARGET_R * risk, t0=ts)
             continue
 
+        # ---------- managing an open trade ----------
         side, entry, risk, sl, tp = pos["side"], pos["entry"], pos["risk"], pos["sl"], pos["tp"]
         long = side == "LONG"
 
         hit_sl = (l <= sl) if long else (h >= sl)
         hit_tp = (h >= tp) if long else (l <= tp)
         if hit_sl or hit_tp:
-            if hit_sl:                                  # SL first if both are touched
+            if hit_sl:                                   # SL first if both are touched
                 exit_price = min(sl, o) if long else max(sl, o)   # gap through the stop fills at the open
                 locked = abs(sl - entry) / risk if ((sl > entry) if long else (sl < entry)) else 0
                 reason = f"LOCK_{locked:.0f}R" if locked else "SL"
@@ -160,16 +196,15 @@ def simulate_session(g: pd.DataFrame, pdh: float):
             pos = None
             continue
 
-        # ladder moves only for the NEXT candle, based on this candle's best price
+        # ladder: uses this candle's best price, takes effect from the next candle
         r_now = ((h - entry) if long else (entry - l)) / risk
-        new_sl = sl
-        if r_now >= 3.0:
-            new_sl = entry + 3.0 * risk if long else entry - 3.0 * risk
-        elif r_now >= 2.0:
-            new_sl = entry + 2.0 * risk if long else entry - 2.0 * risk
-        pos["sl"] = max(sl, new_sl) if long else min(sl, new_sl)
+        for trigger, lock in LADDER:
+            if r_now >= trigger:
+                new_sl = entry + lock * risk if long else entry - lock * risk
+                pos["sl"] = max(sl, new_sl) if long else min(sl, new_sl)
+                break
 
-    if pos is not None:                                 # session over: flatten
+    if pos is not None:                                  # session over: flatten
         last = g.iloc[-1]
         trades.append(_close_trade(pos["side"], pos["entry"], pos["risk"], last["close"],
                                    pos["t0"], g.index[-1], "SESSION_END"))
@@ -186,7 +221,7 @@ def run_strategy(df: pd.DataFrame, session_names=("LONDON", "NY")) -> pd.DataFra
         days = sorted(sessions)
         for k in range(1, len(days)):
             day, prev = days[k], days[k - 1]
-            if (day - prev).days != 1:                  # need yesterday's same session
+            if (day - prev).days != 1:                   # need yesterday's same session
                 continue
             pdh = sessions[prev]["high"].max()
             pdl = sessions[prev]["low"].min()
@@ -198,8 +233,9 @@ def run_strategy(df: pd.DataFrame, session_names=("LONDON", "NY")) -> pd.DataFra
     return pd.DataFrame(all_trades).sort_values("entry_time").reset_index(drop=True)
 
 
+# ----------------------------- REPORT -----------------------------
 def summarize(t: pd.DataFrame, n_sessions: int):
-    print(f"\nSessions tested : {n_sessions}")
+    print(f"\nSessions tested  : {n_sessions}")
     if t.empty:
         print("No trades generated.")
         return
@@ -207,38 +243,38 @@ def summarize(t: pd.DataFrame, n_sessions: int):
     loss_sum = abs(losses["r_net"].sum())
     pf = wins["r_net"].sum() / loss_sum if loss_sum else float("inf")
     equity = t["r_net"].cumsum()
-    print(f"Trades          : {len(t)}  (LONG {int((t.side == 'LONG').sum())}, SHORT {int((t.side == 'SHORT').sum())})")
-    print(f"Win rate        : {len(wins) / len(t) * 100:.1f}%")
+    print(f"Trades           : {len(t)}  (LONG {int((t.side == 'LONG').sum())}, SHORT {int((t.side == 'SHORT').sum())})")
+    print(f"Win rate         : {len(wins) / len(t) * 100:.1f}%")
     print(f"Net R (after fee): {t['r_net'].sum():.2f}   avg {t['r_net'].mean():.3f} R/trade")
-    print(f"Profit factor   : {pf:.2f}")
-    print(f"Max drawdown    : {(equity.cummax() - equity).max():.2f} R")
-    print("\nBy side:")
-    print(t.groupby("side")["r_net"].agg(["count", "sum", "mean"]).round(3))
-    print("\nBy session:")
-    print(t.groupby("session")["r_net"].agg(["count", "sum", "mean"]).round(3))
-    print("\nBy exit reason:")
-    print(t.groupby("reason")["r_net"].agg(["count", "sum", "mean"]).round(3))
+    print(f"Profit factor    : {pf:.2f}")
+    print(f"Max drawdown     : {(equity.cummax() - equity).max():.2f} R")
+    for title, col in (("By session", "session"), ("By side", "side"), ("By exit reason", "reason")):
+        print(f"\n{title}:")
+        print(t.groupby(col)["r_net"].agg(["count", "sum", "mean"]).round(3))
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="CoinDCX ORB + PDH/PDL, NY session only")
+    ap = argparse.ArgumentParser(description="CoinDCX ORB + PDH/PDL, London + NY sessions")
     ap.add_argument("--pair", default="B-BTC_USDT")
     ap.add_argument("--days", type=int, default=14)
-    ap.add_argument("--csv", default="session_trades.csv")
+    ap.add_argument("--chunk-days", type=int, default=5, help="days per API request")
     ap.add_argument("--sessions", default="LONDON,NY", help="comma list, e.g. NY or LONDON,NY")
+    ap.add_argument("--csv", default="session_trades.csv")
     args = ap.parse_args()
-    args.sessions = [s.strip().upper() for s in args.sessions.split(",") if s.strip()]
-    bad = [s for s in args.sessions if s not in SESSION_MINS]
+
+    names = [s.strip().upper() for s in args.sessions.split(",") if s.strip()]
+    bad = [s for s in names if s not in SESSION_MINS]
     if bad:
         ap.error(f"unknown session(s): {bad}; choose from {list(SESSION_MINS)}")
 
     print(f"Fetching CoinDCX {args.pair} 5m candles for {args.days} days...")
     try:
-        data = fetch_coindcx_candles(pair=args.pair, interval="5", limit_days=args.days)
-        res = run_strategy(data, args.sessions)
-        summarize(res, sum(len(build_sessions(data, s)) for s in args.sessions))
+        data = fetch_coindcx_candles(args.pair, "5", args.days, args.chunk_days)
+        print(f"Got {len(data)} candles: {data.index[0]:%Y-%m-%d} to {data.index[-1]:%Y-%m-%d} UTC")
+        res = run_strategy(data, names)
+        summarize(res, sum(len(build_sessions(data, s)) for s in names))
         if not res.empty:
             res.to_csv(args.csv, index=False)
             print(f"\nSaved: {args.csv}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Execution Error: {e}")
