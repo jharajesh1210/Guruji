@@ -1,24 +1,26 @@
-name: CoinDCX Top Futures ORB PDH PDL NY Session Paper Backtest
+name: CoinDCX ORB PDH PDL NY Session Live Paper Trading
 
 on:
   workflow_dispatch:
-    inputs:
-      days:
-        description: "Historical days to fetch for each eligible coin"
-        required: true
-        default: "14"
-        type: string
+  schedule:
+    - cron: "*/5 * * * *"
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: coindcx-orb-pdh-live-paper
+  cancel-in-progress: false
 
 jobs:
-  backtest:
+  live-paper:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - name: Checkout repository
+      - name: Checkout repository and restore paper state
         uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -27,20 +29,32 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pandas numpy requests
-      - name: Compile strategy
-        run: python -m py_compile coindcx_orb_pdh_ny_session.py
-      - name: Run CoinDCX Top Futures NY session paper backtest
+      - name: Compile and run live paper scanner
         env:
-          DAYS: ${{ inputs.days }}
+          TG_TOKEN: \${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: \${{ secrets.TG_CHAT_ID }}
+          BOT_TOKEN: \${{ secrets.BOT_TOKEN }}
+          CHAT_ID: \${{ secrets.CHAT_ID }}
         run: |
-          python -u coindcx_orb_pdh_ny_session.py --days "$DAYS" --csv ny_session_trades.csv --universe-csv eligible_futures_universe.csv
-      - name: Upload results
+          python -m py_compile coindcx_orb_pdh_ny_session.py
+          python -u coindcx_orb_pdh_ny_session.py --mode live-paper
+      - name: Persist paper state and trades
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add orb_pdh_live_state.json orb_pdh_live_trades.csv eligible_futures_universe.csv
+          if ! git diff --cached --quiet; then
+            git commit -m "Update CoinDCX ORB live paper state"
+            git push
+          fi
+      - name: Upload paper trading records
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CoinDCX_TopFutures_ORB_PDH_PDL_NY_${{ github.run_number }}
+          name: CoinDCX_ORB_PDH_Live_Paper_\${{ github.run_number }}
           path: |
-            ny_session_trades.csv
+            orb_pdh_live_state.json
+            orb_pdh_live_trades.csv
             eligible_futures_universe.csv
           if-no-files-found: warn
           retention-days: 30
