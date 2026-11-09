@@ -33,6 +33,44 @@ import requests
 
 URL = "https://public.coindcx.com/market_data/candlesticks"
 
+ACTIVE_FUTURES_URL = "https://api.coindcx.com/exchange/v1/derivatives/futures/data/active_instruments?margin_currency_short_name[]=USDT"
+FUTURES_PRICES_URL = "https://public.coindcx.com/market_data/v3/current_prices/futures/rt"
+MIN_COIN_PRICE_USDT = 1.0
+MIN_24H_VOLUME_USDT = 10_000_000.0
+
+
+def fetch_eligible_futures_pairs():
+    """Return active USDT perpetual futures with LTP > $1 and estimated 24h quote turnover > $10m."""
+    instruments_response = requests.get(ACTIVE_FUTURES_URL, timeout=25)
+    instruments_response.raise_for_status()
+    instruments = instruments_response.json()
+    prices_response = requests.get(FUTURES_PRICES_URL, timeout=25)
+    prices_response.raise_for_status()
+    price_payload = prices_response.json()
+    prices = price_payload.get("prices", {}) if isinstance(price_payload, dict) else {}
+
+    eligible = []
+    for pair in instruments:
+        quote = prices.get(pair)
+        if not isinstance(quote, dict):
+            continue
+        try:
+            last_price = float(quote.get("ls", 0))
+            base_volume_24h = float(quote.get("v", 0))
+            volume_usdt_24h = last_price * base_volume_24h
+        except (TypeError, ValueError):
+            continue
+        if last_price > MIN_COIN_PRICE_USDT and volume_usdt_24h > MIN_24H_VOLUME_USDT:
+            eligible.append({
+                "pair": pair,
+                "last_price_usdt": last_price,
+                "volume_24h_usdt_est": volume_usdt_24h,
+            })
+
+    eligible.sort(key=lambda x: x["volume_24h_usdt_est"], reverse=True)
+    return eligible
+
+
 # ----------------------------- CONFIG -----------------------------
 SESSION_START = "13:30"      # UTC (19:00 IST)
 SESSION_END = "21:00"        # UTC, exclusive
@@ -212,19 +250,43 @@ def summarize(t: pd.DataFrame, n_sessions: int):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="CoinDCX ORB + PDH/PDL, NY session only")
-    ap.add_argument("--pair", default="B-BTC_USDT")
+    ap = argparse.ArgumentParser(description="CoinDCX Top Futures ORB + PDH/PDL, NY session only")
     ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--csv", default="ny_session_trades.csv")
+    ap.add_argument("--universe-csv", default="eligible_futures_universe.csv")
     args = ap.parse_args()
 
-    print(f"Fetching CoinDCX {args.pair} 5m candles for {args.days} days...")
     try:
-        data = fetch_coindcx_candles(pair=args.pair, interval="5", limit_days=args.days)
-        res = run_strategy(data)
-        summarize(res, len(build_sessions(data)))
-        if not res.empty:
-            res.to_csv(args.csv, index=False)
-            print(f"\nSaved: {args.csv}")
+        universe = fetch_eligible_futures_pairs()
+        if not universe:
+            raise RuntimeError("No active USDT futures meet price > 1 USDT and 24h volume > 10,000,000 USDT.")
+        universe_df = pd.DataFrame(universe)
+        universe_df.to_csv(args.universe_csv, index=False)
+        print(f"Eligible futures coins: {len(universe)} (price > {MIN_COIN_PRICE_USDT} USDT; 24h volume > {MIN_24H_VOLUME_USDT:,.0f} USDT)")
+        print(universe_df.to_string(index=False))
+
+        all_results = []
+        for number, coin in enumerate(universe, start=1):
+            pair = coin["pair"]
+            print(f"\\n[{number}/{len(universe)}] Fetching {pair} 5m candles for {args.days} days...")
+            try:
+                data = fetch_coindcx_candles(pair=pair, interval="5", limit_days=args.days)
+                result = run_strategy(data)
+                if not result.empty:
+                    result.insert(0, "pair", pair)
+                    all_results.append(result)
+                print(f"{pair}: sessions={len(build_sessions(data))}, trades={len(result)}")
+            except Exception as exc:
+                print(f"[DATA ERROR] {pair}: {exc}")
+            time.sleep(0.25)
+
+        combined = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+        if not combined.empty:
+            combined = combined.sort_values(["entry_time", "pair"]).reset_index(drop=True)
+        summarize(combined, sum(1 for _ in universe))
+        combined.to_csv(args.csv, index=False)
+        print(f"\\nSaved combined trades: {args.csv}")
+        print(f"Saved eligible coin universe: {args.universe_csv}")
     except Exception as e:
         print(f"Execution Error: {e}")
+        raise
