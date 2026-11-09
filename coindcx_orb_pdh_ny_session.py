@@ -358,7 +358,7 @@ def live_process_pair(pair, state, session, data=None):
                           "pnl_usdt_gross": trade["r_gross"] * float(pos["risk"]) * (NOTIONAL_USDT / float(pos["entry"])),
                           "pnl_usdt_net": trade["r_net"] * float(pos["risk"]) * (NOTIONAL_USDT / float(pos["entry"]))})
             state["trades"].append(trade)
-            send_telegram(f"COINDCX {session} {pos['side']} PAPER EXIT\\n{pair}\\nExit: {exit_price}\\nReason: SESSION_END\\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
+            send_telegram(f"COINDCX {session} {pos['side']} PAPER EXIT\n{pair}\nExit: {exit_price}\nReason: SESSION_END\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
             state["positions"].pop(key, None)
         return
     # Process only fully closed 5-minute bars, and never replay a bar after an Actions rerun.
