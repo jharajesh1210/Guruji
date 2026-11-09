@@ -3,7 +3,7 @@ name: Guruji Actions Schedule Heartbeat (Temporary Diagnostic)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "27 * * * *"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
