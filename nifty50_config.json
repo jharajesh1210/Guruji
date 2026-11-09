@@ -1,7 +1,7 @@
 {
   "mode": "PAPER",
   "selected_sector_count": 3,
-  "top_gainers_losers_count": 20,
+  "top_gainers_losers_count": 5,
   "entry_start": "09:30",
   "entry_cutoff": "14:55",
   "square_off": "15:20",
