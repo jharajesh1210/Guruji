@@ -476,6 +476,10 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
             print(f"[position error] {sym}: {exc}")
             raise
 
+    if state.get("trade_date") != today.isoformat():
+        state["trade_date"] = today.isoformat()
+        state["traded_symbols"] = []
+    traded_symbols = set(state.get("traded_symbols", []))
     used = sum(float(p["notional"]) for p in positions.values())
     risk_budget = capital * RISK_PER_TRADE_PCT/100.0
 
@@ -483,7 +487,7 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
     # with total open notional capped at ₹50,000.
     if ENTRY_START <= ts.time() <= ENTRY_END:
         for sym in SYMBOLS:
-            if sym in positions or cash <= 0:
+            if sym in positions or sym in traded_symbols or cash <= 0:
                 continue
             try:
                 intr, daily = load_intraday(sym, 5), load_daily(sym)
@@ -504,6 +508,7 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
                 notional = qty*float(sig["entry"])
                 if notional < 1:
                     continue
+                traded_symbols.add(sym)
                 positions[sym] = {"symbol":sym,"side":sig["side"],"entry":float(sig["entry"]),
                     "sl":float(sig["sl"]),"target":float(sig["target"]),"qty":float(qty),
                     "notional":float(notional),"entry_time":ts.isoformat()}
@@ -517,7 +522,7 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
                 continue
 
     state.update({"cash":cash,"positions":positions,"last_processed_candle":ts.isoformat(),
-                  "updated_at":now.isoformat()})
+                  "traded_symbols":sorted(traded_symbols),"updated_at":now.isoformat()})
     tmp = PAPER_STATE_FILE+".tmp"
     with open(tmp,"w",encoding="utf-8") as f:
         json.dump(state,f,indent=2)
