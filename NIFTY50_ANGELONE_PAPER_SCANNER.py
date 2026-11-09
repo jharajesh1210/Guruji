@@ -137,7 +137,7 @@ def manage(p,c,cfg):
    p["locked_r"]=float(level)
    if level==5:p["reached_5r"]=True
  if p["reached_5r"]:
-  rev=(p["side"]=="BUY" and colour(c)=="GREEN") or (p["side"]=="SELL" and colour(c)=="RED")
+  rev=(p["side"]=="BUY" and colour(c)=="RED") or (p["side"]=="SELL" and colour(c)=="GREEN")
   if cfg["clear_reverse_method"]=="OPPOSITE_COLOUR_CANDLE_CLOSE" and rev:
    p.update(status="CLOSED",exit_time=c["time"].isoformat(),exit_price=stop_r(p,4),exit_reason="CLEAR_REVERSE_4R")
   elif (c["low"]<=stop_r(p,5) if p["side"]=="BUY" else c["high"]>=stop_r(p,5)):
