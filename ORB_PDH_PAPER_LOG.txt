@@ -1,2 +1,38 @@
-[I 261109 03:55:22 smartConnect:124] in pool
-Nifty index candles unavailable or session not ready.
+[I 261109 04:43:29 smartConnect:124] in pool
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/site-packages/SmartApi/smartConnect.py", line 230, in _request
+    data = json.loads(r.content.decode("utf8"))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/runner/work/Guruji/Guruji/orb_pdh_strategy.py", line 580, in <module>
+    paper_cycle(args.capital)
+  File "/home/runner/work/Guruji/Guruji/orb_pdh_strategy.py", line 460, in paper_cycle
+    idx = load_intraday(INDEX_SYMBOL, 5)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/Guruji/Guruji/orb_pdh_strategy.py", line 161, in load_intraday
+    return _fetch(symbol, "FIVE_MINUTE", days, chunk_days=90)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/Guruji/Guruji/orb_pdh_strategy.py", line 139, in _fetch
+    res = api.getCandleData(params)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/site-packages/SmartApi/smartConnect.py", line 465, in getCandleData
+    getCandleDataResponse=self._postRequest("api.candle.data",historicDataParams)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/site-packages/SmartApi/smartConnect.py", line 263, in _postRequest
+    return self._request(route, "POST", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/site-packages/SmartApi/smartConnect.py", line 233, in _request
+    raise ex.DataException("Couldn't parse the JSON response received from the server: {content}".format(
+SmartApi.smartExceptions.DataException: Couldn't parse the JSON response received from the server: b'Access denied because of exceeding access rate'
