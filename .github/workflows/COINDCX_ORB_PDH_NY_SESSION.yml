@@ -38,6 +38,37 @@ jobs:
         run: |
           python -m py_compile coindcx_orb_pdh_ny_session.py
           python -u coindcx_orb_pdh_ny_session.py --mode live-paper
+      - name: Verify Telegram delivery on manual run
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          token = os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN")
+          chat_id = os.getenv("TG_CHAT_ID") or os.getenv("CHAT_ID")
+          if not token or not chat_id:
+              raise SystemExit("Telegram credentials missing: configure BOT_TOKEN and CHAT_ID (or TG_TOKEN and TG_CHAT_ID) in GitHub Actions Secrets.")
+
+          response = requests.post(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data={
+                  "chat_id": chat_id,
+                  "text": "✅ CoinDCX ORB PDH PDL NY Session: Telegram delivery test successful. Scanner mode: LIVE PAPER; no live orders are placed."
+              },
+              timeout=20,
+          )
+          response.raise_for_status()
+          result = response.json()
+          if not result.get("ok"):
+              raise SystemExit(f"Telegram rejected the message: {result}")
+          print("Telegram delivery confirmed by Telegram API.")
+          PY
       - name: Persist paper state and trades
         run: |
           git config user.name "github-actions[bot]"
