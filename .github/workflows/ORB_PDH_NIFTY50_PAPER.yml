@@ -58,6 +58,7 @@ jobs:
           for file in ORB_PDH_PAPER_STATE.json ORB_PDH_PAPER_TRADES.csv ORB_PDH_PAPER_EQUITY.csv ORB_PDH_PAPER_LOG.txt; do
             if [ -f "$file" ]; then git add "$file"; fi
           done
+          if [ -d angel_daily_cache ]; then git add angel_daily_cache/*.csv 2>/dev/null || true; fi
           if ! git diff --cached --quiet; then
             git commit -m 'Update NIFTY50 ORB PDH PDL paper state'
             git push
@@ -71,6 +72,7 @@ jobs:
           name: NIFTY50_ORB_PDH_PAPER_${{ github.run_number }}
           path: |
             ORB_PDH_PAPER_LOG.txt
+            angel_daily_cache/*.csv
             ORB_PDH_PAPER_STATE.json
             ORB_PDH_PAPER_TRADES.csv
             ORB_PDH_PAPER_EQUITY.csv
