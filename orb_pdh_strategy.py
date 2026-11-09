@@ -191,7 +191,7 @@ def index_state(idx_day: pd.DataFrame, ts) -> str:
 
 
 def check_signal(d: pd.DataFrame, i: int, pdh: float, pdl: float, prev_close: float, idx_day):
-    """Evaluate candle i of day-frame d (with vwap column). Returns dict or None."""
+    """Evaluate original PDH setups plus their mirrored PDL setups."""
     if i < ORB_CANDLES:
         return None
     ts = d.index[i]
@@ -204,28 +204,47 @@ def check_signal(d: pd.DataFrame, i: int, pdh: float, pdl: float, prev_close: fl
     bar = d.iloc[i]
     close = bar["close"]
     day_high = d["high"].iloc[: i + 1].max()
+    day_low = d["low"].iloc[: i + 1].min()
     gap_pct = (d["open"].iloc[0] - prev_close) / prev_close * 100
     st = index_state(idx_day, ts)
+    prior_vol = d["volume"].iloc[max(0, i - VOL_LOOKBACK): i]
+    volume_ok = (
+        len(prior_vol) >= 5
+        and prior_vol.mean() > 0
+        and bar["volume"] >= VOL_MULT * prior_vol.mean()
+    )
 
-    # ---- Scenario A: LONG breakout ----
-    if abs(gap_pct) <= GAP_LIMIT_PCT and close > max(orb_h, pdh) and st == "bull":
-        prior_vol = d["volume"].iloc[max(0, i - VOL_LOOKBACK): i]
-        if len(prior_vol) >= 5 and prior_vol.mean() > 0 and bar["volume"] >= VOL_MULT * prior_vol.mean():
-            sl = orb_l if SL_MODE == "orb" else min(orb_l, bar["vwap"])
-            if SL_MODE == "vwap":
-                sl = bar["vwap"]
-            sl *= 1 - SL_BUFFER_PCT / 100
-            risk = close - sl
-            if 0 < risk and risk / close * 100 <= MAX_RISK_PCT:
-                return dict(side="LONG", entry=close, sl=sl, target=close + RR * risk, risk=risk)
+    # ---- Scenario A (original): LONG breakout above ORB high + PDH ----
+    if abs(gap_pct) <= GAP_LIMIT_PCT and close > max(orb_h, pdh) and st == "bull" and volume_ok:
+        sl = orb_l if SL_MODE == "orb" else bar["vwap"]
+        sl *= 1 - SL_BUFFER_PCT / 100
+        risk = close - sl
+        if 0 < risk and risk / close * 100 <= MAX_RISK_PCT:
+            return dict(side="LONG", entry=close, sl=sl, target=close + RR * risk, risk=risk)
 
-    # ---- Scenario B: SHORT trap / false breakout ----
+    # ---- Scenario B (original): SHORT trap after PDH touch, then ORB-low breakdown ----
     touched_pdh = d["high"].iloc[: i + 1].max() >= pdh * 0.999
     if touched_pdh and close < orb_l and day_high < pdh * 1.01 and st == "bear":
         sl = max(day_high, pdh) * (1 + SL_BUFFER_PCT / 100)
         risk = sl - close
         if 0 < risk and risk / close * 100 <= MAX_RISK_PCT:
             return dict(side="SHORT", entry=close, sl=sl, target=close - RR * risk, risk=risk)
+
+    # ---- Scenario C (new mirror): SHORT breakdown below ORB low + PDL ----
+    if abs(gap_pct) <= GAP_LIMIT_PCT and close < min(orb_l, pdl) and st == "bear" and volume_ok:
+        sl = orb_h if SL_MODE == "orb" else bar["vwap"]
+        sl *= 1 + SL_BUFFER_PCT / 100
+        risk = sl - close
+        if 0 < risk and risk / close * 100 <= MAX_RISK_PCT:
+            return dict(side="SHORT", entry=close, sl=sl, target=close - RR * risk, risk=risk)
+
+    # ---- Scenario D (new mirror): LONG false-breakdown trap after PDL touch ----
+    touched_pdl = day_low <= pdl * 1.001
+    if touched_pdl and close > orb_h and day_low > pdl * 0.99 and st == "bull":
+        sl = min(day_low, pdl) * (1 - SL_BUFFER_PCT / 100)
+        risk = close - sl
+        if 0 < risk and risk / close * 100 <= MAX_RISK_PCT:
+            return dict(side="LONG", entry=close, sl=sl, target=close + RR * risk, risk=risk)
 
     return None
 
