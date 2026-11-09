@@ -1,1 +1,2 @@
-
+entry_time,exit_time,side,entry,exit,risk,r_gross,r_net,reason,pair,session,margin_usdt,leverage,notional_usdt,pnl_usdt_gross,pnl_usdt_net
+2026-11-09T08:20:00+00:00,2026-11-09T10:30:00+00:00,LONG,15.0,14.29,0.7100000000000009,-1.0,-1.0211267605633803,SL,B-CLANKER_USDT,LONDON,100.0,30.0,3000.0,-142.00000000000017,-145.00000000000017
