@@ -469,7 +469,7 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
             closed, cash = manage_paper_exit(positions[sym], day.loc[ts], ts, cash)
             if closed:
                 append_paper_csv(PAPER_TRADES_FILE, closed)
-                events.append(f"NIFTY50 ORB/PDH PAPER EXIT {sym} {closed['side']}\\nExit ₹{closed['exit']:.2f} ({closed['reason']})\\nNet P&L ₹{closed['net_pnl_inr']:+.2f}\\nCash ₹{cash:.2f}\\nPAPER ONLY — no broker order.")
+                events.append(f"NIFTY50 ORB/PDH PAPER EXIT {sym} {closed['side']}\nExit ₹{closed['exit']:.2f} ({closed['reason']})\nNet P&L ₹{closed['net_pnl_inr']:+.2f}\nCash ₹{cash:.2f}\nPAPER ONLY — no broker order.")
                 del positions[sym]
             checked += 1
         except Exception as exc:
@@ -509,7 +509,7 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
                     "notional":float(notional),"entry_time":ts.isoformat()}
                 cash -= notional
                 used += notional
-                events.append(f"NIFTY50 ORB/PDH PAPER {sig['side']} — {sym}\\nEntry ₹{sig['entry']:.2f}\\nSL ₹{sig['sl']:.2f}\\nTarget ₹{sig['target']:.2f} ({RR:g}R)\\nQty {qty:.3f} | Notional ₹{notional:.2f}\\nRisk budget ₹{risk_budget:.2f} | Capital ₹{capital:.2f}\\nCandle {ts.isoformat()}\\nPAPER ONLY — no broker order.")
+                events.append(f"NIFTY50 ORB/PDH PAPER {sig['side']} — {sym}\nEntry ₹{sig['entry']:.2f}\nSL ₹{sig['sl']:.2f}\nTarget ₹{sig['target']:.2f} ({RR:g}R)\nQty {qty:.3f} | Notional ₹{notional:.2f}\nRisk budget ₹{risk_budget:.2f} | Capital ₹{capital:.2f}\nCandle {ts.isoformat()}\nPAPER ONLY — no broker order.")
                 print(f"[PAPER ENTRY] {sym} {sig['side']} qty={qty:.3f} entry={sig['entry']:.2f} SL={sig['sl']:.2f} target={sig['target']:.2f}")
                 checked += 1
             except Exception as exc:
@@ -532,7 +532,7 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
 
 
 def test_telegram():
-    send_telegram("NIFTY50 ORB + PDH/PDL PAPER BOT — TELEGRAM TEST SUCCESSFUL\\nCapital ₹50,000\\nPAPER ONLY — no broker order sent.")
+    send_telegram("NIFTY50 ORB + PDH/PDL PAPER BOT — TELEGRAM TEST SUCCESSFUL\nCapital ₹50,000\nPAPER ONLY — no broker order sent.")
 
 
 if __name__ == "__main__":
