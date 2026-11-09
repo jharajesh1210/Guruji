@@ -244,8 +244,8 @@ def run_strategy(df: pd.DataFrame) -> pd.DataFrame:
         days = sorted(sessions)
         for k in range(1, len(days)):
             day, prev = days[k], days[k - 1]
-            if (day - prev).days != 1:
-                continue
+            # Use the previous available complete session (e.g. Friday before Monday),
+            # not necessarily the previous calendar date.
             pdh = sessions[prev]["high"].max()
             for trade in simulate_session(sessions[day], pdh):
                 trade["session"] = session
@@ -326,17 +326,21 @@ def live_process_pair(pair, state, session, data=None):
     local_now = now.astimezone(cfg["tz"])
     today = local_now.date()
     complete_prior = complete_sessions(d[d.index.tz_convert(cfg["tz"]).date < today], session)
-    prev_days = [day for day in complete_prior if (today - day).days == 1]
+    prev_days = sorted(day for day in complete_prior if day < today)
     if not prev_days:
+        print(f"[{session}] {local_now:%Y-%m-%d %H:%M %Z}: waiting for previous complete session data.")
         return
     g = session_day(d, session, today)
     if g.empty:
+        print(f"[{session}] {local_now:%Y-%m-%d %H:%M %Z}: session has not opened yet.")
         return
     prev = complete_prior[prev_days[-1]]
     pdh = float(prev["high"].max())
     orb = g.iloc[:ORB_CANDLES]
     if len(orb) < ORB_CANDLES:
+        print(f"[{session}] {local_now:%Y-%m-%d %H:%M %Z}: collecting first {ORB_CANDLES} ORB candles.")
         return
+    print(f"[{session}] active | local={local_now:%Y-%m-%d %H:%M %Z} | prior_session={prev_days[-1]} | candles_today={len(g)}")
     orb_high, orb_low = float(orb["high"].max()), float(orb["low"].min())
     key = f"{session}:{pair}"
     pos = state["positions"].get(key)
