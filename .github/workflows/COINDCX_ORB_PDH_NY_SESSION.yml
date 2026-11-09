@@ -31,10 +31,10 @@ jobs:
           python -m pip install pandas numpy requests
       - name: Compile and run live paper scanner
         env:
-          TG_TOKEN: \${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: \${{ secrets.TG_CHAT_ID }}
-          BOT_TOKEN: \${{ secrets.BOT_TOKEN }}
-          CHAT_ID: \${{ secrets.CHAT_ID }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python -m py_compile coindcx_orb_pdh_ny_session.py
           python -u coindcx_orb_pdh_ny_session.py --mode live-paper
@@ -51,7 +51,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CoinDCX_ORB_PDH_Live_Paper_\${{ github.run_number }}
+          name: CoinDCX_ORB_PDH_Live_Paper
           path: |
             orb_pdh_live_state.json
             orb_pdh_live_trades.csv
