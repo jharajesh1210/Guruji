@@ -249,44 +249,192 @@ def summarize(t: pd.DataFrame, n_sessions: int):
     print(t.groupby("reason")["r_net"].agg(["count", "sum", "mean"]).round(3))
 
 
+
+import json
+import os
+from datetime import datetime, timezone
+
+STATE_FILE = "orb_pdh_live_state.json"
+TRADES_FILE = "orb_pdh_live_trades.csv"
+MARGIN_USDT = 100.0
+LEVERAGE = 30.0
+NOTIONAL_USDT = MARGIN_USDT * LEVERAGE
+
+def send_telegram(message):
+    token = os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN")
+    chat_id = os.getenv("TG_CHAT_ID") or os.getenv("CHAT_ID")
+    if not token or not chat_id:
+        print("[TELEGRAM NOT CONFIGURED] Add TG_TOKEN and TG_CHAT_ID GitHub secrets.")
+        return
+    response = requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data={"chat_id": chat_id, "text": message},
+        timeout=20,
+    )
+    response.raise_for_status()
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {"positions": {}, "last_bar": {}, "trades": []}
+    with open(STATE_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, default=str)
+    pd.DataFrame(state.get("trades", [])).to_csv(TRADES_FILE, index=False)
+
+def live_process_pair(pair, state):
+    # Pull enough candles for prior-session PDH and the rolling 20-bar volume baseline.
+    data = fetch_coindcx_candles(pair=pair, interval="5", limit_days=4)
+    if data.empty:
+        return
+    d = data.copy()
+    d["vol_avg"] = d["volume"].rolling(VOL_LOOKBACK, min_periods=VOL_LOOKBACK).mean().shift(1)
+    sessions = build_sessions(d)
+    days = sorted(sessions)
+    if not days:
+        return
+    today = days[-1]
+    # Only trade the current UTC session; a previous complete session is mandatory.
+    now = datetime.now(timezone.utc)
+    if now.date() != today:
+        return
+    prev_days = [day for day in days if (today - day).days == 1]
+    if not prev_days:
+        return
+    g = sessions[today]
+    prev = sessions[prev_days[-1]]
+    pdh = float(prev["high"].max())
+    orb = g.iloc[:ORB_CANDLES]
+    if len(orb) < ORB_CANDLES:
+        return
+    orb_high, orb_low = float(orb["high"].max()), float(orb["low"].min())
+    key = pair
+    pos = state["positions"].get(key)
+    last_seen = state["last_bar"].get(key)
+    # Process only fully closed 5-minute bars, and never replay a bar after an Actions rerun.
+    closed = g.iloc[:-1] if now.minute % 5 != 0 or now.second < 3 else g
+    if closed.empty:
+        return
+    for ts, bar in closed.iterrows():
+        stamp = ts.isoformat()
+        if last_seen and stamp <= last_seen:
+            continue
+        if ts.date() != today or ts.hour * 60 + ts.minute < S0 + ORB_CANDLES * CANDLE_MIN:
+            state["last_bar"][key] = stamp
+            last_seen = stamp
+            continue
+        o, h, l, c, v = map(float, (bar["open"], bar["high"], bar["low"], bar["close"], bar["volume"]))
+        # Keep the original setup calculations and thresholds unchanged.
+        upto = g.loc[:ts]
+        run_high = float(upto["high"].max())
+        if pos is None:
+            rng = h - l
+            strong = rng > 0 and abs(c - o) / rng >= BODY_MIN
+            va = bar["vol_avg"]
+            spike = (not pd.isna(va)) and v >= VOL_MULT * float(va)
+            if strong and spike:
+                long_ok = c > max(orb_high, pdh) and c > o
+                short_ok = run_high >= pdh * 0.999 and c < orb_low and run_high < pdh * 1.01 and c < o
+                side = None
+                if long_ok:
+                    sl = orb_low
+                    risk = c - sl
+                    if risk > 0:
+                        side = "LONG"
+                elif short_ok:
+                    sl = run_high * (1 + SHORT_SL_BUFFER)
+                    risk = sl - c
+                    if risk > 0:
+                        side = "SHORT"
+                if side:
+                    pos = {"side": side, "entry": c, "sl": float(sl), "risk": float(risk),
+                           "tp": float(c + TARGET_R*risk if side == "LONG" else c-TARGET_R*risk),
+                           "t0": stamp, "entry_bar": stamp, "pdh": pdh, "orb_high": orb_high,
+                           "orb_low": orb_low, "margin": MARGIN_USDT, "leverage": LEVERAGE,
+                           "notional": NOTIONAL_USDT}
+                    state["positions"][key] = pos
+                    qty = NOTIONAL_USDT / c
+                    send_telegram(f"COINDCX ORB {side} PAPER\n{pair}\nEntry: {c}\nSL: {sl}\nTP: {pos['tp']}\nMargin: {MARGIN_USDT} USDT | Leverage: {LEVERAGE}x | Notional: {NOTIONAL_USDT} USDT\nQty: {qty:.8f}")
+            state["last_bar"][key] = stamp
+            last_seen = stamp
+            continue
+
+        side, entry, risk, sl, tp = pos["side"], float(pos["entry"]), float(pos["risk"]), float(pos["sl"]), float(pos["tp"])
+        is_long = side == "LONG"
+        hit_sl = (l <= sl) if is_long else (h >= sl)
+        hit_tp = (h >= tp) if is_long else (l <= tp)
+        if hit_sl or hit_tp:
+            exit_price = sl if hit_sl else tp
+            reason = "TARGET_4R" if not hit_sl else ("BREAKEVEN" if sl == entry else ("LOCKED_PROFIT" if ((sl > entry) if is_long else (sl < entry)) else "SL"))
+            trade = _close_trade(side, entry, risk, exit_price, pos["t0"], stamp, reason)
+            trade.update({"pair": pair, "margin_usdt": MARGIN_USDT, "leverage": LEVERAGE,
+                          "notional_usdt": NOTIONAL_USDT,
+                          "pnl_usdt_gross": trade["r_gross"] * risk * (NOTIONAL_USDT / entry),
+                          "pnl_usdt_net": trade["r_net"] * risk * (NOTIONAL_USDT / entry)})
+            state["trades"].append(trade)
+            send_telegram(f"COINDCX {side} PAPER EXIT\n{pair}\nExit: {exit_price}\nReason: {reason}\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
+            pos = None
+            state["positions"].pop(key, None)
+        else:
+            r_now = ((h-entry) if is_long else (entry-l)) / risk
+            new_sl = sl
+            if r_now >= 3.0:
+                new_sl = entry + 1.5*risk if is_long else entry - 1.5*risk
+            elif r_now >= 2.0:
+                new_sl = entry
+            pos["sl"] = max(sl, new_sl) if is_long else min(sl, new_sl)
+            state["positions"][key] = pos
+        state["last_bar"][key] = stamp
+        last_seen = stamp
+
+def run_live_paper():
+    state = load_state()
+    universe = fetch_eligible_futures_pairs()
+    if not universe:
+        raise RuntimeError("No eligible USDT futures found; live-paper scan aborted.")
+    pd.DataFrame(universe).to_csv("eligible_futures_universe.csv", index=False)
+    print(f"Live-paper scan: {len(universe)} pairs | margin={MARGIN_USDT} USDT | leverage={LEVERAGE}x | notional={NOTIONAL_USDT} USDT")
+    for i, coin in enumerate(universe, 1):
+        pair = coin["pair"]
+        print(f"[{i}/{len(universe)}] {pair}")
+        try:
+            live_process_pair(pair, state)
+        except Exception as exc:
+            print(f"[PAIR ERROR] {pair}: {exc}")
+        time.sleep(0.25)
+    save_state(state)
+    print(f"Open paper positions: {len(state['positions'])}; closed paper trades: {len(state['trades'])}")
+
+
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="CoinDCX Top Futures ORB + PDH/PDL, NY session only")
+    ap = argparse.ArgumentParser(description="CoinDCX ORB + PDH/PDL NY session paper trading")
+    ap.add_argument("--mode", choices=["backtest", "live-paper"], default="live-paper")
     ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--csv", default="ny_session_trades.csv")
     ap.add_argument("--universe-csv", default="eligible_futures_universe.csv")
     args = ap.parse_args()
-
-    try:
+    if args.mode == "live-paper":
+        run_live_paper()
+    else:
         universe = fetch_eligible_futures_pairs()
-        if not universe:
-            raise RuntimeError("No active USDT futures meet price > 1 USDT and 24h volume > 10,000,000 USDT.")
-        universe_df = pd.DataFrame(universe)
-        universe_df.to_csv(args.universe_csv, index=False)
-        print(f"Eligible futures coins: {len(universe)} (price > {MIN_COIN_PRICE_USDT} USDT; 24h volume > {MIN_24H_VOLUME_USDT:,.0f} USDT)")
-        print(universe_df.to_string(index=False))
-
+        pd.DataFrame(universe).to_csv(args.universe_csv, index=False)
         all_results = []
         for number, coin in enumerate(universe, start=1):
             pair = coin["pair"]
-            print(f"\\n[{number}/{len(universe)}] Fetching {pair} 5m candles for {args.days} days...")
+            print(f"[{number}/{len(universe)}] Fetching {pair} 5m candles...")
             try:
                 data = fetch_coindcx_candles(pair=pair, interval="5", limit_days=args.days)
                 result = run_strategy(data)
                 if not result.empty:
                     result.insert(0, "pair", pair)
                     all_results.append(result)
-                print(f"{pair}: sessions={len(build_sessions(data))}, trades={len(result)}")
             except Exception as exc:
                 print(f"[DATA ERROR] {pair}: {exc}")
             time.sleep(0.25)
-
         combined = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
         if not combined.empty:
             combined = combined.sort_values(["entry_time", "pair"]).reset_index(drop=True)
-        summarize(combined, sum(1 for _ in universe))
+        summarize(combined, len(universe))
         combined.to_csv(args.csv, index=False)
-        print(f"\\nSaved combined trades: {args.csv}")
-        print(f"Saved eligible coin universe: {args.universe_csv}")
-    except Exception as e:
-        print(f"Execution Error: {e}")
-        raise
