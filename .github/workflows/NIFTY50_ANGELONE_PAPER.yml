@@ -1,0 +1,50 @@
+name: NIFTY50 Preopen AngelOne Paper Scanner
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 09:25 IST, Monday-Friday. Starts the paper scanner after pre-open selection window.
+    - cron: '55 3 * * 1-5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nifty50-angelone-paper
+  cancel-in-progress: false
+
+jobs:
+  paper-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_nifty50_angelone.txt
+
+      - name: Run NIFTY50 paper scanner
+        env:
+          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python -u NIFTY50_ANGELONE_PAPER_SCANNER.py
+
+      - name: Upload paper reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nifty50-paper-reports-${{ github.run_id }}
+          path: nifty50_output/
+          if-no-files-found: warn
+          retention-days: 30
