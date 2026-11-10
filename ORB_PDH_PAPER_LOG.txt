@@ -1,2 +1,2 @@
-[I 261110 07:20:00 smartConnect:124] in pool
+[I 261110 07:25:00 smartConnect:124] in pool
 Nifty index candles unavailable or session not ready.
