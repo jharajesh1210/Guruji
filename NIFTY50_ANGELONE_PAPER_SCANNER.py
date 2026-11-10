@@ -50,10 +50,22 @@ def login():
  if not r or r.get("status") is not True: raise RuntimeError("Angel One login failed: "+str(r))
  return api
 def preopen(symbols):
- s=requests.Session(); s.headers.update({"User-Agent":"Mozilla/5.0 Chrome/122 Safari/537.36","Accept":"application/json, text/plain, */*","Referer":"https://www.nseindia.com/"})
- s.get("https://www.nseindia.com",timeout=20); r=s.get(NSE_URL,timeout=25); r.raise_for_status()
- rows=r.json().get("data")
- if not isinstance(rows,list): raise RuntimeError("NSE pre-open response schema changed.")
+ hdr={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36","Accept":"application/json, text/plain, */*","Accept-Language":"en-US,en;q=0.9","Accept-Encoding":"gzip, deflate","Referer":"https://www.nseindia.com/market-data/pre-open-market-cnm-and-emerge-market-capital","Connection":"keep-alive"}
+ rows=None
+ for attempt in range(1,4):
+  s=requests.Session(); s.headers.update(hdr)
+  try:
+   s.get("https://www.nseindia.com/",timeout=20)
+   s.get("https://www.nseindia.com/market-data/pre-open-market-cnm-and-emerge-market-capital",timeout=20)
+   r=s.get(NSE_URL,timeout=25)
+   logging.info("NSE pre-open attempt %d: HTTP %s, %d bytes, content-type=%s",attempt,r.status_code,len(r.content),r.headers.get("Content-Type"))
+   r.raise_for_status()
+   got=r.json().get("data")
+   if isinstance(got,list) and got: rows=got; break
+   logging.warning("NSE pre-open attempt %d returned no rows; body starts: %s",attempt,r.text[:200].replace("\n"," "))
+  except Exception as e: logging.warning("NSE pre-open attempt %d failed: %s",attempt,e)
+  time.sleep(3*attempt)
+ if rows is None: raise RuntimeError("NSE pre-open returned no data after 3 attempts.")
  out={}
  for z in rows:
   m=z.get("metadata") or {}; d=z.get("detail") or {}; p=d.get("preOpenMarket") or {}
@@ -63,6 +75,20 @@ def preopen(symbols):
   if not px or not prev: continue
   out[sym]={"symbol":sym,"preopen_price":px,"previous_close":prev,"change_pct":(px-prev)/prev*100}
  if len(out)<35: raise RuntimeError(f"Only {len(out)} NIFTY50 pre-open rows parsed ({len(out)}); refusing partial data.")
+ return out
+def angel_snapshot(api,tokens,symbols):
+ # Fallback when NSE pre-open data is unavailable: Angel One LTP vs previous close at selection time.
+ out={}
+ for sym in symbols:
+  t=tokens.get(sym)
+  if not t: continue
+  try:
+   r=api.ltpData("NSE",t["tradingsymbol"],t["token"]); d=(r or {}).get("data") or {}
+   px=fnum(d.get("ltp")); prev=fnum(d.get("close"))
+   if px and prev: out[sym]={"symbol":sym,"preopen_price":px,"previous_close":prev,"change_pct":(px-prev)/prev*100}
+  except Exception as e: logging.warning("Angel snapshot %s failed: %s",sym,e)
+  time.sleep(.12)
+ if len(out)<35: raise RuntimeError(f"Angel One fallback snapshot incomplete: only {len(out)} symbols; refusing partial data.")
  return out
 def instrument_tokens(cfg):
  OUT.mkdir(exist_ok=True); cache=OUT/"OpenAPIScripMaster.json"
@@ -156,13 +182,18 @@ def main():
  target=current.replace(hour=9,minute=25,second=5,microsecond=0)
  while now()<target:
   logging.info("Waiting for 09:25 IST selection snapshot."); time.sleep(5)
- pre=preopen(set(cfg["symbols"]))
+ try:
+  pre=preopen(set(cfg["symbols"])); data_source="NSE_PREOPEN"
+ except Exception as e:
+  logging.warning("NSE pre-open unavailable (%s); using Angel One LTP vs previous close as the selection snapshot.",e)
+  pre=angel_snapshot(api,tokens,set(cfg["symbols"])); data_source="ANGEL_LTP_FALLBACK"
+ logging.info("Selection data source: %s",data_source)
  bias,a,d,u,candidates,sector_info=select(pre,cfg)
  logging.info("Pre-open breadth Advance=%d Decline=%d Unchanged=%d Bias=%s",a,d,u,bias)
  day=now().date()
  if bias=="NEUTRAL": logging.info("Neutral market: no selection."); return
  prices=ltp(api,tokens,[x["symbol"] for x in candidates]); watch=rank(candidates,prices,bias,cfg)
- summary={"date":str(day),"advance":a,"decline":d,"unchanged":u,"bias":bias,**sector_info}
+ summary={"date":str(day),"advance":a,"decline":d,"unchanged":u,"bias":bias,"data_source":data_source,**sector_info}
  (OUT/f"market_summary_{day}.json").write_text(json.dumps(summary,indent=2),encoding="utf-8")
  fields=["symbol","direction","sector","selection_price","selection_change_pct","preopen_price","change_pct","previous_close"]
  with (OUT/f"watchlist_{day}.csv").open("w",newline="",encoding="utf-8-sig") as f:
