@@ -385,5 +385,7 @@ def run_live_paper():
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="CoinDCX ORB + PDH/PDL NY/London session PAPER trading (no real orders)")
+    ap.add_argument("--mode", default="live-paper", choices=["live-paper"],
+                    help="Run mode (only live-paper exists; the GitHub workflow passes --mode live-paper)")
     ap.parse_args()
     run_live_paper()
