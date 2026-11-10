@@ -8,11 +8,11 @@ Each session uses its own ORB and previous session levels. London adjusts automa
                    Entries are only allowed after the ORB is complete (13:45 UTC onwards).
 - PDH / PDL      : high / low of the PREVIOUS NY session (same window), not the 24h UTC day.
 - Volume spike   : candle volume >= 2x average of the previous 20 candles (current candle excluded).
-- LONG  (A)      : close > max(ORB high, PDH), volume spike, green candle, body >= BODY_MIN (60%) of range,
+- LONG  (A)      : close > max(ORB high, PDH), volume spike, green candle, body >= BODY_MIN (50%) of range,
                    close in TOP 25% of the candle range (CLOSE_EXTREME_PCT).
                    SL = ORB low.
 - SHORT (B)      : PDH touched in session, close < ORB low, session high < PDH * 1.01, volume spike,
-                   red candle, body >= BODY_MIN (60%) of range,
+                   red candle, body >= BODY_MIN (50%) of range,
                    close in BOTTOM 25% of the candle range.   SL = session high so far * 1.001.
 - Stop ladder    : 2R reached -> SL locks +2R | 3R reached -> SL locks +3R | 4R -> final target exit.
                    Each candle is checked against the SL that was in force at the START of that candle
@@ -87,7 +87,7 @@ ORB_CANDLES = 3              # 3 x 5m = 15 min
 VOL_MULT = 2.0
 VOL_LOOKBACK = 20
 CLOSE_EXTREME_PCT = 0.25     # LONG: close in top 25% of candle range; SHORT: close in bottom 25%
-BODY_MIN = 0.6               # candle body must be >= 60% of its range (was 0.4)
+BODY_MIN = 0.5               # candle body must be >= 50% of its range (was 0.6, originally 0.4)
 TARGET_R = 4.0
 SHORT_SL_BUFFER = 0.001
 FEE_PCT_PER_SIDE = 0.05      # taker fee estimate, % of notional per side
