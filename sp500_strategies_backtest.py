@@ -287,10 +287,12 @@ def main():
     # full grid for transparency
     allrows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rsi_rows + gap_rows]
     pd.DataFrame(allrows).to_csv(os.path.join(OUT_DIR, "grid_results.csv"), index=False)
-    lines.append("## Parameter grid (train vs test CAGR %, trades)\n")
+    lines.append("## Parameter grid (CAGR %, trades, max drawdown %)\n")
     g = [{"strategy": r["strategy"], "params": r["params"], "train_cagr": r["train_cagr_pct"], "train_n": r["train_trades"],
-          "test_cagr": r["test_cagr_pct"], "test_n": r["test_trades"]} for r in rsi_rows + gap_rows]
-    lines.append(md_table(g, ["strategy", "params", "train_cagr", "train_n", "test_cagr", "test_n"]))
+          "test_cagr": r["test_cagr_pct"], "test_n": r["test_trades"],
+          "train_dd": r["train_max_dd_pct"], "test_dd": r["test_max_dd_pct"], "test_win": r["test_win_rate"]}
+         for r in rsi_rows + gap_rows]
+    lines.append(md_table(g, ["strategy", "params", "train_cagr", "train_n", "train_dd", "test_cagr", "test_n", "test_dd", "test_win"]))
     lines.append("\n_Limits: daily bars, SPY ETF (no futures roll/margin), stop-first assumption on gap trades, "
                  "no dividends, costs approximate. Past results do not guarantee future results; not financial advice._\n")
 
