@@ -8,20 +8,27 @@ Each session uses its own ORB and previous session levels. London adjusts automa
                    Entries are only allowed after the ORB is complete (13:45 UTC onwards).
 - PDH / PDL      : high / low of the PREVIOUS NY session (same window), not the 24h UTC day.
 - Volume spike   : candle volume >= 2x average of the previous 20 candles (current candle excluded).
-- LONG  (A)      : close > max(ORB high, PDH), volume spike, green candle, body >= 40% of range.
+- LONG  (A)      : close > max(ORB high, PDH), volume spike, green candle, body >= BODY_MIN (60%) of range,
+                   close in TOP 25% of the candle range (CLOSE_EXTREME_PCT).
                    SL = ORB low.
 - SHORT (B)      : PDH touched in session, close < ORB low, session high < PDH * 1.01, volume spike,
-                   red candle, body >= 40% of range.   SL = session high so far * 1.001.
+                   red candle, body >= BODY_MIN (60%) of range,
+                   close in BOTTOM 25% of the candle range.   SL = session high so far * 1.001.
 - Stop ladder    : 2R reached -> SL locks +2R | 3R reached -> SL locks +3R | 4R -> final target exit.
                    Each candle is checked against the SL that was in force at the START of that candle
                    (SL is checked before target); the ladder only moves for the NEXT candle.
-- Session end    : any open trade is closed at the last session candle's close.
+- Session end    : any open trade is closed at the last session candle's close, BUT to avoid
+                   session-end losses: (1) no new entries in the last ENTRY_CUTOFF_MIN_BEFORE_END min,
+                   (2) TIME_STOP exit if the trade is < TIME_STOP_MIN_R after MAX_HOLD_CANDLES candles,
+                   (3) in the last PROTECT_MIN_BEFORE_END min a profitable trade gets SL moved to lock profit.
 - Fees           : FEE_PCT_PER_SIDE is charged on entry and exit and shown in R.
 
 Sessions with missing candles (incomplete) are skipped, and so is a session whose previous
 session is missing or incomplete (no valid PDH/PDL).
 
-Research / paper-trading tool only. It places no orders.
+PAPER TRADING ONLY. This script never places real orders and has no API key / order-placement code.
+It only reads public CoinDCX market data, tracks simulated positions in orb_pdh_live_state.json
+and sends Telegram alerts.
 """
 
 import argparse
@@ -79,11 +86,26 @@ CANDLE_MIN = 5
 ORB_CANDLES = 3              # 3 x 5m = 15 min
 VOL_MULT = 2.0
 VOL_LOOKBACK = 20
-BODY_MIN = 0.4
+CLOSE_EXTREME_PCT = 0.25     # LONG: close in top 25% of candle range; SHORT: close in bottom 25%
+BODY_MIN = 0.6               # candle body must be >= 60% of its range (was 0.4)
 TARGET_R = 4.0
 SHORT_SL_BUFFER = 0.001
 FEE_PCT_PER_SIDE = 0.05      # taker fee estimate, % of notional per side
 MIN_SESSION_FILL = 0.95      # share of expected candles a session needs to count as complete
+
+# --- Step 7 fix: session-end losses ---
+# 1) Late-entry cutoff: no NEW entries in the last N minutes of the session. Trades opened late
+#    have no time to reach 2R/4R and just get force-closed at a random price at SESSION_END.
+ENTRY_CUTOFF_MIN_BEFORE_END = 90
+# 2) Time stop: if a trade is still below TIME_STOP_MIN_R (at candle close) after
+#    MAX_HOLD_CANDLES candles, exit at that close instead of waiting for SESSION_END.
+MAX_HOLD_CANDLES = 24        # 24 x 5m = 2 hours
+TIME_STOP_MIN_R = 1.0
+# 3) Pre-close protection: in the last PROTECT_MIN_BEFORE_END minutes, if the trade is in profit
+#    (>= PROTECT_MIN_R at close), SL is moved to lock PROTECT_LOCK_R. Set PROTECT_MIN_BEFORE_END = 0 to disable.
+PROTECT_MIN_BEFORE_END = 45
+PROTECT_MIN_R = 0.5
+PROTECT_LOCK_R = 0.0         # 0.0 = breakeven
 # -------------------------------------------------------------------
 
 
@@ -120,19 +142,6 @@ def fetch_coindcx_candles(pair="B-BTC_USDT", interval="5", limit_days=14):
     return frame.dropna().drop_duplicates("time").sort_values("time").set_index("time")
 
 
-def build_sessions(d: pd.DataFrame) -> dict:
-    """UTC date -> candles of that day's NY session. Incomplete sessions are dropped."""
-    mins = d.index.hour * 60 + d.index.minute
-    sess = d[(mins >= S0) & (mins < S1)]
-    expected = (S1 - S0) // CANDLE_MIN
-    out = {}
-    for day, g in sess.groupby(sess.index.date):
-        if len(g) >= int(expected * MIN_SESSION_FILL):
-            out[day] = g
-    return out
-
-
-
 from zoneinfo import ZoneInfo
 LONDON_TZ = ZoneInfo("Europe/London")
 SESSION_CONFIG = {
@@ -167,114 +176,11 @@ def _close_trade(side, entry, risk, exit_price, entry_time, exit_time, reason):
     }
 
 
-def simulate_session(g: pd.DataFrame, pdh: float):
-    orb = g.iloc[:ORB_CANDLES]
-    orb_high, orb_low = orb["high"].max(), orb["low"].min()
-    run_high = g["high"].cummax().values
-
-    trades, pos = [], None
-    for i in range(ORB_CANDLES, len(g)):
-        bar, ts = g.iloc[i], g.index[i]
-        o, h, l, c, v = bar["open"], bar["high"], bar["low"], bar["close"], bar["volume"]
-
-        if pos is None:
-            rng = h - l
-            strong = rng > 0 and abs(c - o) / rng >= BODY_MIN
-            va = bar["vol_avg"]
-            spike = (not np.isnan(va)) and v >= VOL_MULT * va
-            if not (strong and spike):
-                continue
-
-            long_ok = c > max(orb_high, pdh) and c > o
-            short_ok = run_high[i] >= pdh * 0.999 and c < orb_low and run_high[i] < pdh * 1.01 and c < o
-
-            if long_ok:
-                sl = orb_low
-                risk = c - sl
-                if risk > 0:
-                    pos = dict(side="LONG", entry=c, sl=sl, risk=risk, tp=c + TARGET_R * risk, t0=ts)
-            elif short_ok:
-                sl = run_high[i] * (1 + SHORT_SL_BUFFER)
-                risk = sl - c
-                if risk > 0:
-                    pos = dict(side="SHORT", entry=c, sl=sl, risk=risk, tp=c - TARGET_R * risk, t0=ts)
-            continue
-
-        side, entry, risk, sl, tp = pos["side"], pos["entry"], pos["risk"], pos["sl"], pos["tp"]
-        long = side == "LONG"
-
-        hit_sl = (l <= sl) if long else (h >= sl)
-        hit_tp = (h >= tp) if long else (l <= tp)
-        if hit_sl or hit_tp:
-            exit_price = sl if hit_sl else tp          # SL first if both are touched
-            if not hit_sl:
-                reason = f"TARGET_{TARGET_R:g}R"
-            elif sl == entry:
-                reason = "BREAKEVEN"
-            elif (sl > entry) if long else (sl < entry):
-                reason = "LOCKED_PROFIT"
-            else:
-                reason = "SL"
-            trades.append(_close_trade(side, entry, risk, exit_price, pos["t0"], ts, reason))
-            pos = None
-            continue
-
-        # ladder moves only for the NEXT candle, based on this candle's best price
-        r_now = ((h - entry) if long else (entry - l)) / risk
-        new_sl = sl
-        if r_now >= 3.0:
-            new_sl = entry + 3.0 * risk if long else entry - 3.0 * risk
-        elif r_now >= 2.0:
-            new_sl = entry + 2.0 * risk if long else entry - 2.0 * risk
-        pos["sl"] = max(sl, new_sl) if long else min(sl, new_sl)
-
-    if pos is not None:                                 # session over: flatten
-        last = g.iloc[-1]
-        trades.append(_close_trade(pos["side"], pos["entry"], pos["risk"], last["close"],
-                                   pos["t0"], g.index[-1], "SESSION_END"))
-    return trades
-
-
-def run_strategy(df: pd.DataFrame) -> pd.DataFrame:
-    d = df.copy()
-    d["vol_avg"] = d["volume"].rolling(VOL_LOOKBACK, min_periods=VOL_LOOKBACK).mean().shift(1)
-    all_trades = []
-    for session in SESSION_CONFIG:
-        sessions = complete_sessions(d, session)
-        days = sorted(sessions)
-        for k in range(1, len(days)):
-            day, prev = days[k], days[k - 1]
-            # Use the previous available complete session (e.g. Friday before Monday),
-            # not necessarily the previous calendar date.
-            pdh = sessions[prev]["high"].max()
-            for trade in simulate_session(sessions[day], pdh):
-                trade["session"] = session
-                trade["session_date"] = str(day)
-                trade["pdh"] = pdh
-                trade["pdl"] = sessions[prev]["low"].min()
-                all_trades.append(trade)
-    return pd.DataFrame(all_trades)
-
-
-def summarize(t: pd.DataFrame, n_sessions: int):
-    print(f"\nSessions tested : {n_sessions}")
-    if t.empty:
-        print("No trades generated.")
-        return
-    wins, losses = t[t["r_net"] > 0], t[t["r_net"] <= 0]
-    loss_sum = abs(losses["r_net"].sum())
-    pf = wins["r_net"].sum() / loss_sum if loss_sum else float("inf")
-    equity = t["r_net"].cumsum()
-    print(f"Trades          : {len(t)}  (LONG {int((t.side == 'LONG').sum())}, SHORT {int((t.side == 'SHORT').sum())})")
-    print(f"Win rate        : {len(wins) / len(t) * 100:.1f}%")
-    print(f"Net R (after fee): {t['r_net'].sum():.2f}   avg {t['r_net'].mean():.3f} R/trade")
-    print(f"Profit factor   : {pf:.2f}")
-    print(f"Max drawdown    : {(equity.cummax() - equity).max():.2f} R")
-    print("\nBy side:")
-    print(t.groupby("side")["r_net"].agg(["count", "sum", "mean"]).round(3))
-    print("\nBy exit reason:")
-    print(t.groupby("reason")["r_net"].agg(["count", "sum", "mean"]).round(3))
-
+def mins_to_session_end(ts, session):
+    """Minutes left until SESSION_END for a candle that opens at ts (candle's own length included)."""
+    cfg = SESSION_CONFIG[session]
+    lt = ts.tz_convert(cfg["tz"])
+    return _hm(cfg["end"]) - (lt.hour * 60 + lt.minute)
 
 
 import json
@@ -377,14 +283,15 @@ def live_process_pair(pair, state, session, data=None):
         # Keep the original setup calculations and thresholds unchanged.
         upto = g.loc[:ts]
         run_high = float(upto["high"].max())
+        left = mins_to_session_end(ts, session)
         if pos is None:
             rng = h - l
             strong = rng > 0 and abs(c - o) / rng >= BODY_MIN
             va = bar["vol_avg"]
             spike = (not pd.isna(va)) and v >= VOL_MULT * float(va)
-            if strong and spike:
-                long_ok = c > max(orb_high, pdh) and c > o
-                short_ok = run_high >= pdh * 0.999 and c < orb_low and run_high < pdh * 1.01 and c < o
+            if strong and spike and left > ENTRY_CUTOFF_MIN_BEFORE_END:   # Step 7 fix: no late entries
+                long_ok = c > max(orb_high, pdh) and c > o and (c - l) / rng >= 1 - CLOSE_EXTREME_PCT
+                short_ok = run_high >= pdh * 0.999 and c < orb_low and run_high < pdh * 1.01 and c < o and (h - c) / rng >= 1 - CLOSE_EXTREME_PCT
                 side = None
                 if long_ok:
                     sl = orb_low
@@ -426,12 +333,30 @@ def live_process_pair(pair, state, session, data=None):
             pos = None
             state["positions"].pop(key, None)
         else:
+            close_r = ((c-entry) if is_long else (entry-c)) / risk
+            held = int((ts - pd.Timestamp(pos["entry_bar"])).total_seconds() // (CANDLE_MIN * 60))
+            if held >= MAX_HOLD_CANDLES and close_r < TIME_STOP_MIN_R:    # Step 7 fix: time stop
+                trade = _close_trade(side, entry, risk, c, pos["t0"], stamp, "TIME_STOP")
+                trade.update({"pair": pair, "session": session, "margin_usdt": MARGIN_USDT, "leverage": LEVERAGE,
+                              "notional_usdt": NOTIONAL_USDT,
+                              "pnl_usdt_gross": trade["r_gross"] * risk * (NOTIONAL_USDT / entry),
+                              "pnl_usdt_net": trade["r_net"] * risk * (NOTIONAL_USDT / entry)})
+                state["trades"].append(trade)
+                send_telegram(f"COINDCX {session} {side} PAPER EXIT\n{pair}\nExit: {c}\nReason: TIME_STOP\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
+                pos = None
+                state["positions"].pop(key, None)
+                state["last_bar"][key] = stamp
+                last_seen = stamp
+                continue
             r_now = ((h-entry) if is_long else (entry-l)) / risk
             new_sl = sl
             if r_now >= 3.0:
                 new_sl = entry + 3.0*risk if is_long else entry - 3.0*risk
             elif r_now >= 2.0:
                 new_sl = entry + 2.0*risk if is_long else entry - 2.0*risk
+            if PROTECT_MIN_BEFORE_END and left <= PROTECT_MIN_BEFORE_END and close_r >= PROTECT_MIN_R:  # Step 7 fix
+                lock = entry + PROTECT_LOCK_R*risk if is_long else entry - PROTECT_LOCK_R*risk
+                new_sl = max(new_sl, lock) if is_long else min(new_sl, lock)
             pos["sl"] = max(sl, new_sl) if is_long else min(sl, new_sl)
             state["positions"][key] = pos
         state["last_bar"][key] = stamp
@@ -459,32 +384,6 @@ def run_live_paper():
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="CoinDCX ORB + PDH/PDL NY session paper trading")
-    ap.add_argument("--mode", choices=["backtest", "live-paper"], default="live-paper")
-    ap.add_argument("--days", type=int, default=14)
-    ap.add_argument("--csv", default="ny_session_trades.csv")
-    ap.add_argument("--universe-csv", default="eligible_futures_universe.csv")
-    args = ap.parse_args()
-    if args.mode == "live-paper":
-        run_live_paper()
-    else:
-        universe = fetch_eligible_futures_pairs()
-        pd.DataFrame(universe).to_csv(args.universe_csv, index=False)
-        all_results = []
-        for number, coin in enumerate(universe, start=1):
-            pair = coin["pair"]
-            print(f"[{number}/{len(universe)}] Fetching {pair} 5m candles...")
-            try:
-                data = fetch_coindcx_candles(pair=pair, interval="5", limit_days=args.days)
-                result = run_strategy(data)
-                if not result.empty:
-                    result.insert(0, "pair", pair)
-                    all_results.append(result)
-            except Exception as exc:
-                print(f"[DATA ERROR] {pair}: {exc}")
-            time.sleep(0.25)
-        combined = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
-        if not combined.empty:
-            combined = combined.sort_values(["entry_time", "pair"]).reset_index(drop=True)
-        summarize(combined, len(universe))
-        combined.to_csv(args.csv, index=False)
+    ap = argparse.ArgumentParser(description="CoinDCX ORB + PDH/PDL NY/London session PAPER trading (no real orders)")
+    ap.parse_args()
+    run_live_paper()
