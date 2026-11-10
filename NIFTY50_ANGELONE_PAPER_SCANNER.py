@@ -8,9 +8,12 @@ import requests
 try:
     import pyotp
     from SmartApi import SmartConnect
-except ImportError:
+except ImportError as _import_err:
     pyotp = None
     SmartConnect = None
+    IMPORT_ERROR = repr(_import_err)
+else:
+    IMPORT_ERROR = ""
 
 IST=ZoneInfo("Asia/Kolkata")
 ROOT=Path(__file__).resolve().parent
@@ -41,7 +44,7 @@ def login():
  names=["ANGEL_API_KEY","ANGEL_CLIENT_CODE","ANGEL_PASSWORD","ANGEL_TOTP_SECRET"]
  missing=[x for x in names if not os.getenv(x)]
  if missing: raise RuntimeError("Missing GitHub Secrets: "+", ".join(missing))
- if SmartConnect is None or pyotp is None: raise RuntimeError("Dependencies missing; install requirements file.")
+ if SmartConnect is None or pyotp is None: raise RuntimeError(f"Dependencies missing; install requirements file. Import error: {IMPORT_ERROR}")
  api=SmartConnect(api_key=os.environ["ANGEL_API_KEY"])
  r=api.generateSession(os.environ["ANGEL_CLIENT_CODE"],os.environ["ANGEL_PASSWORD"],pyotp.TOTP(os.environ["ANGEL_TOTP_SECRET"]).now())
  if not r or r.get("status") is not True: raise RuntimeError("Angel One login failed: "+str(r))
