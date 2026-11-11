@@ -81,12 +81,16 @@ SCRIP_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files
 SCRIP_MASTER_FILE = "angel_scrip_master.json"
 INDEX_TOKENS = {"Nifty 50": "99926000"}
 REQUEST_GAP_SEC = 4.0                # Conservative spacing between Angel historical candle requests
+RATE_LIMIT_WAITS = (20, 40, 60)      # seconds to pause after an Angel "Too many requests" reply, then retry
+RATE_LIMIT_BUDGET_SEC = 150          # max total seconds ONE cycle may spend waiting on rate limits
+CYCLE_DEADLINE_SEC = 420             # stop starting new symbols after this; the next cycle continues the scan
 DAILY_CACHE_DIR = "angel_daily_cache"
 DAILY_CACHE_MAX_AGE_SEC = 86400
 
 _api = None
 _tokens = None
 _last_candle_request = 0.0
+_rate_limit_waited = 0.0
 
 
 class AngelRateLimitError(RuntimeError):
@@ -94,10 +98,16 @@ class AngelRateLimitError(RuntimeError):
 
 
 def _get_candles_with_retry(api, params, symbol):
-    """Throttle every historical request and retry transient/rate-limit failures."""
-    global _last_candle_request
+    """Throttle every historical request; retry transient failures and PAUSE+RETRY on rate-limit replies.
+
+    A rate-limit reply no longer aborts the cycle at once: we wait RATE_LIMIT_WAITS seconds and try again, up to
+    RATE_LIMIT_BUDGET_SEC of total waiting per cycle. Only then AngelRateLimitError is raised.
+    """
+    global _last_candle_request, _rate_limit_waited
     last_error = None
-    for attempt in range(3):
+    attempt = 0          # transient (non rate-limit) failures
+    rl_tries = 0         # rate-limit pauses used for this request
+    while attempt < 3:
         wait = REQUEST_GAP_SEC - (time.monotonic() - _last_candle_request)
         if wait > 0:
             time.sleep(wait)
@@ -115,13 +125,20 @@ def _get_candles_with_retry(api, params, symbol):
         rate_limited = ("exceeding access rate" in message or "access denied" in message
                         or "rate limit" in message or "too many request" in message)
         if rate_limited:
-            # Do not hammer Angel One with repeated retries after an explicit rate-limit response.
-            raise AngelRateLimitError(
-                f"Angel One rate limit reached for {symbol}; remaining symbols deferred to next cycle."
-            ) from last_error
+            if rl_tries >= len(RATE_LIMIT_WAITS) or _rate_limit_waited + RATE_LIMIT_WAITS[rl_tries] > RATE_LIMIT_BUDGET_SEC:
+                raise AngelRateLimitError(
+                    f"Angel One rate limit reached for {symbol}; remaining symbols continue in the next cycle."
+                ) from last_error
+            pause = RATE_LIMIT_WAITS[rl_tries]
+            rl_tries += 1
+            print(f"[warn] {symbol}: Angel One rate limit; pausing {pause}s then retrying ({rl_tries}/{len(RATE_LIMIT_WAITS)})")
+            time.sleep(pause)
+            _rate_limit_waited += pause
+            continue
         delay = (3, 6, 12)[attempt]
         print(f"[warn] {symbol}: candle API attempt {attempt + 1}/3 failed; retrying in {delay}s: {last_error}")
         time.sleep(delay)
+        attempt += 1
     raise RuntimeError(f"Angel One candle request failed for {symbol}: {last_error}") from last_error
 
 
@@ -527,6 +544,7 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
     if not (dt.time(9, 15) <= now.time() <= dt.time(15, 30)):
         print(f"Outside NSE market hours (09:15-15:30 IST); no API calls. Current time: {now:%H:%M:%S}")
         return
+    cycle_start = time.monotonic()
     state = load_paper_state(capital)
     try:
         idx = load_intraday(INDEX_SYMBOL, 1)
@@ -548,6 +566,12 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
     if state.get("last_processed_candle") == ts.isoformat():
         print(f"Duplicate closed candle {ts.isoformat()}; no action.")
         return
+    # A candle counts as "processed" only after EVERY symbol was scanned. If Angel One throttles us part-way, the
+    # symbols already done are remembered here and the next cycle continues with the rest of the SAME candle.
+    if state.get("scan_candle") != ts.isoformat():
+        state["scan_candle"], state["scan_done"] = ts.isoformat(), []
+    scan_done = set(state.get("scan_done", []))
+    incomplete = False
 
     cash = float(state["cash"])
     positions = state.setdefault("positions", {})
@@ -556,6 +580,8 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
     # Manage existing paper positions first; SL is assumed before target if both hit in one bar.
     for sym in list(positions):
         try:
+            if positions[sym].get("entry_time") == ts.isoformat():
+                continue   # opened at this very candle's close in an earlier partial pass of the same candle
             intr = load_intraday(sym, 5)
             day = split_days(intr).get(today) if not intr.empty else None
             if day is None or ts not in day.index:
@@ -566,6 +592,10 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
                 events.append(f"NIFTY50 ORB/PDH PAPER EXIT {sym} {closed['side']}\nExit ₹{closed['exit']:.2f} ({closed['reason']})\nNet P&L ₹{closed['net_pnl_inr']:+.2f}\nCash ₹{cash:.2f}\nPAPER ONLY — no broker order.")
                 del positions[sym]
             checked += 1
+        except AngelRateLimitError as exc:
+            incomplete = True   # position not managed for this candle yet -> candle stays unprocessed, retried next cycle
+            print(f"[DATA UNAVAILABLE] {exc}")
+            continue
         except Exception as exc:
             print(f"[position error] {sym}: {exc}")
             raise
@@ -581,10 +611,15 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
     # with total open notional capped at ₹50,000.
     if ENTRY_START <= ts.time() <= ENTRY_END:
         for sym in SYMBOLS:
-            if sym in positions or sym in traded_symbols or cash <= 0:
+            if sym in positions or sym in traded_symbols or cash <= 0 or sym in scan_done:
                 continue
+            if time.monotonic() - cycle_start > CYCLE_DEADLINE_SEC:
+                incomplete = True
+                print("[DATA UNAVAILABLE] Cycle time budget used; remaining symbols continue in the next cycle.")
+                break
             try:
                 intr, daily = load_intraday(sym, 1), load_daily(sym)
+                scan_done.add(sym)
                 if intr.empty or daily.empty:
                     continue
                 day = split_days(intr).get(today)
@@ -612,23 +647,29 @@ def paper_cycle(capital=DEFAULT_CAPITAL):
                 print(f"[PAPER ENTRY] {sym} {sig['side']} qty={qty:.3f} entry={sig['entry']:.2f} SL={sig['sl']:.2f} target={sig['target']:.2f}")
                 checked += 1
             except AngelRateLimitError as exc:
-                print(f"[DATA UNAVAILABLE] {exc} Remaining symbols deferred to the next scheduled cycle.")
+                incomplete = True
+                print(f"[DATA UNAVAILABLE] {exc}")
                 break
             except Exception as exc:
+                scan_done.add(sym)
                 print(f"[data error] {sym}: {exc}")
                 continue
 
-    state.update({"cash":cash,"positions":positions,"last_processed_candle":ts.isoformat(),
-                  "traded_symbols":sorted(traded_symbols),"updated_at":now.isoformat()})
+    state.update({"cash":cash,"positions":positions,"traded_symbols":sorted(traded_symbols),
+                  "scan_candle":ts.isoformat(),"scan_done":sorted(scan_done),"updated_at":now.isoformat()})
+    if not incomplete:
+        state["last_processed_candle"] = ts.isoformat()
     tmp = PAPER_STATE_FILE+".tmp"
     with open(tmp,"w",encoding="utf-8") as f:
         json.dump(state,f,indent=2)
     os.replace(tmp,PAPER_STATE_FILE)
     equity = cash+used
-    append_paper_csv(PAPER_EQUITY_FILE,{"time":ts.isoformat(),"cash_inr":cash,
-        "reserved_capital_inr":used,"open_positions":len(positions),
-        "equity_estimate_inr":equity,"events_this_cycle":checked})
-    print(f"PAPER STATUS | capital ₹{capital:.2f} | cash ₹{cash:.2f} | reserved ₹{used:.2f} | open positions {len(positions)}")
+    if not incomplete:
+        append_paper_csv(PAPER_EQUITY_FILE,{"time":ts.isoformat(),"cash_inr":cash,
+            "reserved_capital_inr":used,"open_positions":len(positions),
+            "equity_estimate_inr":equity,"events_this_cycle":checked})
+    status_tail = " | SCAN INCOMPLETE, continues next cycle" if incomplete else ""
+    print(f"PAPER STATUS | capital ₹{capital:.2f} | cash ₹{cash:.2f} | reserved ₹{used:.2f} | open positions {len(positions)} | symbols scanned {len(scan_done)}/{len(SYMBOLS)} for candle {ts:%H:%M}{status_tail}")
     for message in events:
         send_telegram(message)
 
