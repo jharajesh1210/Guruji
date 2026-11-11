@@ -1,1 +1,2 @@
-
+entry_time,exit_time,side,entry,exit,risk,r_gross,r_net,reason,pair,session,margin_usdt,leverage,notional_usdt,pnl_usdt_gross,pnl_usdt_net
+2026-11-11T08:25:00+00:00,2026-11-11T10:25:00+00:00,LONG,3.556,3.549,0.028000000000000025,-0.25000000000000394,-0.37700000000000383,TIME_STOP,B-NATGAS_USDT,LONDON,100.0,30.0,3000.0,-5.90551181102372,-8.90551181102372
