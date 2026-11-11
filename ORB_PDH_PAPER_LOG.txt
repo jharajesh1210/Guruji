@@ -1,2 +1,1 @@
-[I 261111 09:55:00 smartConnect:124] in pool
-PAPER STATUS | capital ₹50000.00 | cash ₹50000.00 | reserved ₹0.00 | open positions 0 | symbols scanned 0/50 for candle 15:20
+Outside NSE market hours (09:15-15:30 IST); no API calls. Current time: 15:30:00
