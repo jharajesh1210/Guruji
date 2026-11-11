@@ -1,38 +1,5 @@
 {
-  "positions": {
-    "NY:B-AR_USDT": {
-      "side": "SHORT",
-      "entry": 3.233,
-      "sl": 3.3263229999999995,
-      "risk": 0.09332299999999938,
-      "tp": 2.8597080000000026,
-      "t0": "2026-11-11T19:00:00+00:00",
-      "entry_bar": "2026-11-11T19:00:00+00:00",
-      "pdh": 3.318,
-      "orb_high": 3.283,
-      "orb_low": 3.267,
-      "margin": 100.0,
-      "leverage": 30.0,
-      "notional": 3000.0,
-      "session": "NY"
-    },
-    "NY:B-RENDER_USDT": {
-      "side": "SHORT",
-      "entry": 1.578,
-      "sl": 1.6326309999999997,
-      "risk": 0.05463099999999965,
-      "tp": 1.3594760000000015,
-      "t0": "2026-11-11T19:00:00+00:00",
-      "entry_bar": "2026-11-11T19:00:00+00:00",
-      "pdh": 1.622,
-      "orb_high": 1.603,
-      "orb_low": 1.596,
-      "margin": 100.0,
-      "leverage": 30.0,
-      "notional": 3000.0,
-      "session": "NY"
-    }
-  },
+  "positions": {},
   "last_bar": {
     "LONDON:B-BTC_USDT": "2026-11-11T15:15:00+00:00",
     "LONDON:B-ETH_USDT": "2026-11-11T15:20:00+00:00",
@@ -1909,6 +1876,42 @@
       "notional_usdt": 3000.0,
       "pnl_usdt_gross": 8.07381776239911,
       "pnl_usdt_net": 5.073817762399111
+    },
+    {
+      "entry_time": "2026-11-11T19:00:00+00:00",
+      "exit_time": "2026-11-11T20:55:00+00:00",
+      "side": "SHORT",
+      "entry": 3.233,
+      "exit": 3.213,
+      "risk": 0.09332299999999938,
+      "r_gross": 0.2143094414024426,
+      "r_net": 0.17966632019973777,
+      "reason": "SESSION_END",
+      "pair": "B-AR_USDT",
+      "session": "NY",
+      "margin_usdt": 100.0,
+      "leverage": 30.0,
+      "notional_usdt": 3000.0,
+      "pnl_usdt_gross": 18.55861429013302,
+      "pnl_usdt_net": 15.55861429013302
+    },
+    {
+      "entry_time": "2026-11-11T19:00:00+00:00",
+      "exit_time": "2026-11-11T20:55:00+00:00",
+      "side": "SHORT",
+      "entry": 1.578,
+      "exit": 1.575,
+      "risk": 0.05463099999999965,
+      "r_gross": 0.05491387673665378,
+      "r_net": 0.02602917757317498,
+      "reason": "SESSION_END",
+      "pair": "B-RENDER_USDT",
+      "session": "NY",
+      "margin_usdt": 100.0,
+      "leverage": 30.0,
+      "notional_usdt": 3000.0,
+      "pnl_usdt_gross": 5.703422053232155,
+      "pnl_usdt_net": 2.7034220532321545
     }
   ]
 }
