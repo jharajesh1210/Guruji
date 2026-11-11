@@ -6,13 +6,10 @@
   "trade_count": 0,
   "trade_date": "2026-11-11",
   "traded_symbols": [],
-  "updated_at": "2026-11-11T14:30:01.226121+05:30",
-  "scan_candle": "2026-11-11T14:25:00+05:30",
+  "updated_at": "2026-11-11T14:35:00.641342+05:30",
+  "scan_candle": "2026-11-11T14:30:00+05:30",
   "scan_done": [
     "ADANIENT",
-    "ADANIPORTS",
-    "APOLLOHOSP",
-    "ASIANPAINT",
-    "AXISBANK"
+    "ADANIPORTS"
   ]
 }
