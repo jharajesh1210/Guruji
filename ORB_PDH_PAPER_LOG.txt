@@ -1,2 +1,4 @@
-[I 261111 09:40:00 smartConnect:124] in pool
-PAPER STATUS | capital ₹50000.00 | cash ₹50000.00 | reserved ₹0.00 | open positions 0 | symbols scanned 0/50 for candle 15:05
+[I 261111 09:45:00 smartConnect:124] in pool
+[warn] Nifty 50: Angel One rate limit; pausing 20s then retrying (1/3)
+[warn] Nifty 50: Angel One rate limit; pausing 40s then retrying (2/3)
+Duplicate closed candle 2026-11-11T15:05:00+05:30; no action.
