@@ -13,6 +13,9 @@ What is different here (everything else is copied as-is from the original):
     mirrored to the other side of the entry:  SHORT sl = entry + risk | LONG sl = entry - risk.
     Target is still 4R, with the same 2R/3R lock ladder, time stop and pre-close protection.
   * BODY_MIN = 0.4 (candle body >= 40% of its range) instead of 0.5.
+  * ONE TRADE PER CRYPTO PER DAY: once a pair has had a paper trade in today's NY session (still open or
+    already closed by SL / target / time stop), no new entry is taken on that pair until the next day.
+    (Tracked in the state file under "traded_days".)
   * Separate state / trades / universe files (part02_*) so it never mixes with PART-01.
 
 ----- original description (setup detection is unchanged) -----
@@ -267,6 +270,7 @@ def live_process_pair(pair, state, session, data=None):
     print(f"[{session}] active | local={local_now:%Y-%m-%d %H:%M %Z} | prior_session={prev_days[-1]} | candles_today={len(g)}")
     orb_high, orb_low = float(orb["high"].max()), float(orb["low"].min())
     key = f"{session}:{pair}"
+    traded_days = state.setdefault("traded_days", {})   # PART-02: one trade per pair per day
     pos = state["positions"].get(key)
     last_seen = state["last_bar"].get(key)
     # At/after the session close, flatten any remaining paper position at the
@@ -307,7 +311,7 @@ def live_process_pair(pair, state, session, data=None):
             strong = rng > 0 and abs(c - o) / rng >= BODY_MIN
             va = bar["vol_avg"]
             spike = (not pd.isna(va)) and v >= VOL_MULT * float(va)
-            if strong and spike and left > ENTRY_CUTOFF_MIN_BEFORE_END:   # Step 7 fix: no late entries
+            if strong and spike and left > ENTRY_CUTOFF_MIN_BEFORE_END and traded_days.get(key) != today.isoformat():   # no late entries; PART-02: max 1 trade/pair/day
                 long_ok = c > max(orb_high, pdh) and c > o and (c - l) / rng >= 1 - CLOSE_EXTREME_PCT
                 short_ok = run_high >= pdh * 0.999 and c < orb_low and run_high < pdh * 1.01 and c < o and (h - c) / rng >= 1 - CLOSE_EXTREME_PCT
                 side = None
@@ -329,6 +333,7 @@ def live_process_pair(pair, state, session, data=None):
                            "orb_low": orb_low, "margin": MARGIN_USDT, "leverage": LEVERAGE,
                            "notional": NOTIONAL_USDT, "session": session}
                     state["positions"][key] = pos
+                    traded_days[key] = today.isoformat()
                     qty = NOTIONAL_USDT / c
                     send_telegram(f"COINDCX PART-02 {session} ORB FADE {side} PAPER (from {setup})\n{pair}\nEntry: {c}\nSL: {sl}\nTP: {pos['tp']}\nMargin: {MARGIN_USDT} USDT | Leverage: {LEVERAGE}x | Notional: {NOTIONAL_USDT} USDT\nQty: {qty:.8f}")
             state["last_bar"][key] = stamp
