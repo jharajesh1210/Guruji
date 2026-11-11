@@ -1,1 +1,2 @@
-Outside NSE market hours (09:15-15:30 IST); no API calls. Current time: 09:10:01
+[I 261111 03:45:01 smartConnect:124] in pool
+[DATA UNAVAILABLE] Nifty index request rate-limited: Angel One rate limit reached for Nifty 50; remaining symbols deferred to next cycle.
