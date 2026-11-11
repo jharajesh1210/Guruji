@@ -1,2 +1,2 @@
-[I 261111 05:15:01 smartConnect:124] in pool
+[I 261111 05:20:00 smartConnect:124] in pool
 [DATA UNAVAILABLE] Nifty index request rate-limited: Angel One rate limit reached for Nifty 50; remaining symbols deferred to next cycle.
