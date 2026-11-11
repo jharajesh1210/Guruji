@@ -1,10 +1,10 @@
 # PART-02: CoinDCX ORB + PDH/PDL paper trader. Both sessions: candle body 40% and max one trade per crypto per day.
 # NY session also flips the direction (inverse/fade); London keeps the original direction.
 # Separate from COINDCX_ORB_PDH_NY_SESSION.yml (PART-01).
-# Runs only while a session can be open: London open (07:50 UTC in winter / 06:50 UTC in summer) to 21:10 UTC,
-# instead of 24h, so it uses fewer Actions minutes. A GitHub job can run at most 6h, so each run loops ~5.5h and
-# re-dispatches itself while the window is still open. The cron lines are starters/backups; concurrency keeps one
-# active run, and a run started outside the window exits at once. Paper only: no orders are placed.
+# Self-sustaining chain (like PART-01): GitHub's cron is best-effort and often skipped, so every run loops ~5.5h and
+# re-dispatches itself, keeping one run alive all day. The scanner only scans inside the trading window (London open
+# 07:50 UTC in winter / 06:50 UTC in summer, to 21:10 UTC); outside it the loop just idles. The cron below is only a
+# backup starter. Paper only: no orders are placed.
 name: CoinDCX ORB PDH PART-02 (NY inverse + London) Paper Trading
 
 on:
@@ -15,10 +15,7 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: "50 6 * * *"
-    - cron: "50 7 * * *"
-    - cron: "20 13 * * *"
-    - cron: "5 19 * * *"
+    - cron: "10 */3 * * *"
 
 permissions:
   contents: write
@@ -87,12 +84,14 @@ jobs:
           cycle=0
           while [ "$(date +%s)" -lt "$END" ]; do
             hm=$((10#$(date -u +%H%M)))
+            START=$(date +%s)
             if [ "$FORCE" != "true" ] && { [ "$hm" -lt "$(window_start)" ] || [ "$hm" -ge 2110 ]; }; then
-              echo "Outside the trading window ($(window_start)-2110 UTC); nothing to do now (UTC time $hm)."
-              break
+              # Outside the trading window: stay alive (so the chain never breaks) but do not scan.
+              NEXT=$(( (START / 300 + 1) * 300 ))
+              sleep $((NEXT - START))
+              continue
             fi
             cycle=$((cycle + 1))
-            START=$(date +%s)
             echo "=== cycle ${cycle} @ $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
             if ! timeout 600 python -u "coindcx_orb_pdh_ny_session_PART-02.py" --mode live-paper; then
               echo "WARN: cycle ${cycle} failed or timed out; continuing."
@@ -108,14 +107,12 @@ jobs:
             fi
           done
           echo "Loop finished after ${cycle} cycles."
-      - name: Re-dispatch while a session is still open
+      - name: Re-dispatch to keep the chain alive
         if: success() || failure()
         run: |
-          if [ "$(TZ=Europe/London date +%z)" = "+0100" ]; then WS=650; else WS=750; fi
-          hm=$((10#$(date -u +%H%M)))
-          if [ "$FORCE" != "true" ] && [ "$hm" -ge "$WS" ] && [ "$hm" -lt 2100 ]; then
-            echo "Trading window still open (UTC $hm); starting the next run."
-            gh workflow run COINDCX_ORB_PDH_NY_PART02.yml --repo "${{ github.repository }}" --ref main
+          if [ "$FORCE" = "true" ]; then
+            echo "Forced test run: no re-dispatch."
           else
-            echo "No re-dispatch needed (UTC $hm)."
+            echo "Starting the next run of the chain."
+            gh workflow run COINDCX_ORB_PDH_NY_PART02.yml --repo "${{ github.repository }}" --ref main
           fi
