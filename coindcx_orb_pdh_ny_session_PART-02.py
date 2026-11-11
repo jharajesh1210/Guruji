@@ -3,20 +3,22 @@ PART-02: INVERSE (fade) version of the CoinDCX NY-session ORB + PDH/PDL strategy
 The original file coindcx_orb_pdh_ny_session.py is untouched and keeps running as PART-01.
 
 What is different here (everything else is copied as-is from the original):
-  * Only the NY session is traded (RUN_SESSIONS = ["NY"]); London stays in the original file.
-  * The trade direction is FLIPPED:
-      - when the original LONG setup forms (close > max(ORB high, PDH) + volume spike + strong green candle)
-        -> this file opens a SHORT at that close.
-      - when the original SHORT setup forms (PDH touched, close < ORB low + volume spike + strong red candle)
-        -> this file opens a LONG at that close.
-  * Risk distance is the original setup's distance (long setup: close - ORB low; short setup: SL - close),
-    mirrored to the other side of the entry:  SHORT sl = entry + risk | LONG sl = entry - risk.
-    Target is still 4R, with the same 2R/3R lock ladder, time stop and pre-close protection.
-  * BODY_MIN = 0.4 (candle body >= 40% of its range) instead of 0.5.
-  * ONE TRADE PER CRYPTO PER DAY: once a pair has had a paper trade in today's NY session (still open or
-    already closed by SL / target / time stop), no new entry is taken on that pair until the next day.
-    (Tracked in the state file under "traded_days".)
+  * NY session ONLY gets the new rules (see SESSION_RULES):
+      - the trade direction is FLIPPED:
+          when the original LONG setup forms (close > max(ORB high, PDH) + volume spike + strong green candle)
+          -> a SHORT is opened at that close;
+          when the original SHORT setup forms (PDH touched, close < ORB low + volume spike + strong red candle)
+          -> a LONG is opened at that close.
+      - risk distance is the original setup's distance (long setup: close - ORB low; short setup: SL - close),
+        mirrored to the other side of the entry:  SHORT sl = entry + risk | LONG sl = entry - risk.
+        Target is still 4R, with the same 2R/3R lock ladder, time stop and pre-close protection.
+      - candle body >= 40% of range (BODY_MIN_NY).
+      - ONE TRADE PER CRYPTO PER DAY: once a pair has had a paper trade in today's NY session (open or already
+        closed by SL / target / time stop), no new NY entry on that pair until the next day
+        (tracked in the state file under "traded_days").
+  * LONDON session is exactly as in the original file: same direction, body >= 50%, no daily limit.
   * Separate state / trades / universe files (part02_*) so it never mixes with PART-01.
+    (London therefore runs in BOTH files with the same logic; the alerts say PART-02.)
 
 ----- original description (setup detection is unchanged) -----
 CoinDCX Futures ORB + PDH/PDL (Long & Short), NY and London sessions
@@ -100,7 +102,7 @@ def fetch_eligible_futures_pairs():
 
 
 # ----------------------------- CONFIG -----------------------------
-RUN_SESSIONS = ["NY"]       # PART-02 trades the NY session only
+RUN_SESSIONS = ["NY", "LONDON"]
 SESSION_START = "13:30"      # UTC (19:00 IST)
 SESSION_END = "21:00"        # UTC, exclusive
 CANDLE_MIN = 5
@@ -108,7 +110,13 @@ ORB_CANDLES = 3              # 3 x 5m = 15 min
 VOL_MULT = 2.0
 VOL_LOOKBACK = 20
 CLOSE_EXTREME_PCT = 0.25     # LONG: close in top 25% of candle range; SHORT: close in bottom 25%
-BODY_MIN = 0.4               # PART-02: candle body must be >= 40% of its range (PART-01 uses 0.5)
+BODY_MIN = 0.5               # original value: candle body must be >= 50% of its range (London uses this)
+BODY_MIN_NY = 0.4            # PART-02: NY candle body must be >= 40% of its range
+# Per-session behaviour. London = original behaviour. NY = PART-02 changes.
+SESSION_RULES = {
+    "NY":     {"invert": True,  "body_min": BODY_MIN_NY, "one_trade_per_day": True},
+    "LONDON": {"invert": False, "body_min": BODY_MIN,    "one_trade_per_day": False},
+}
 TARGET_R = 4.0
 SHORT_SL_BUFFER = 0.001
 FEE_PCT_PER_SIDE = 0.05      # taker fee estimate, % of notional per side
@@ -250,6 +258,7 @@ def live_process_pair(pair, state, session, data=None):
     # session must pass the original complete-session validation.
     now = datetime.now(timezone.utc)
     cfg = SESSION_CONFIG[session]
+    rules = SESSION_RULES[session]
     local_now = now.astimezone(cfg["tz"])
     today = local_now.date()
     complete_prior = complete_sessions(d[d.index.tz_convert(cfg["tz"]).date < today], session)
@@ -308,24 +317,30 @@ def live_process_pair(pair, state, session, data=None):
         left = mins_to_session_end(ts, session)
         if pos is None:
             rng = h - l
-            strong = rng > 0 and abs(c - o) / rng >= BODY_MIN
+            strong = rng > 0 and abs(c - o) / rng >= rules["body_min"]
             va = bar["vol_avg"]
             spike = (not pd.isna(va)) and v >= VOL_MULT * float(va)
-            if strong and spike and left > ENTRY_CUTOFF_MIN_BEFORE_END and traded_days.get(key) != today.isoformat():   # no late entries; PART-02: max 1 trade/pair/day
+            if strong and spike and left > ENTRY_CUTOFF_MIN_BEFORE_END and not (rules["one_trade_per_day"] and traded_days.get(key) == today.isoformat()):   # no late entries; NY: max 1 trade/pair/day
                 long_ok = c > max(orb_high, pdh) and c > o and (c - l) / rng >= 1 - CLOSE_EXTREME_PCT
                 short_ok = run_high >= pdh * 0.999 and c < orb_low and run_high < pdh * 1.01 and c < o and (h - c) / rng >= 1 - CLOSE_EXTREME_PCT
                 side = None
                 setup = None
                 if long_ok:
-                    # PART-02: long breakout setup -> trade it as a SHORT (stop mirrored above the entry)
                     risk = c - orb_low
                     if risk > 0:
-                        side, setup, sl = "SHORT", "LONG_BREAKOUT", c + risk
+                        if rules["invert"]:      # NY: long breakout setup -> SHORT (stop mirrored above the entry)
+                            side, setup, sl = "SHORT", "LONG_BREAKOUT", c + risk
+                        else:                    # London: original behaviour
+                            side, setup, sl = "LONG", "LONG_BREAKOUT", orb_low
                 elif short_ok:
-                    # PART-02: short breakdown setup -> trade it as a LONG (stop mirrored below the entry)
-                    risk = run_high * (1 + SHORT_SL_BUFFER) - c
-                    if risk > 0 and c - risk > 0:
-                        side, setup, sl = "LONG", "SHORT_BREAKDOWN", c - risk
+                    sl0 = run_high * (1 + SHORT_SL_BUFFER)
+                    risk = sl0 - c
+                    if risk > 0:
+                        if rules["invert"]:      # NY: short breakdown setup -> LONG (stop mirrored below the entry)
+                            if c - risk > 0:
+                                side, setup, sl = "LONG", "SHORT_BREAKDOWN", c - risk
+                        else:                    # London: original behaviour
+                            side, setup, sl = "SHORT", "SHORT_BREAKDOWN", sl0
                 if side:
                     pos = {"side": side, "setup": setup, "entry": c, "sl": float(sl), "risk": float(risk),
                            "tp": float(c + TARGET_R*risk if side == "LONG" else c-TARGET_R*risk),
@@ -335,7 +350,8 @@ def live_process_pair(pair, state, session, data=None):
                     state["positions"][key] = pos
                     traded_days[key] = today.isoformat()
                     qty = NOTIONAL_USDT / c
-                    send_telegram(f"COINDCX PART-02 {session} ORB FADE {side} PAPER (from {setup})\n{pair}\nEntry: {c}\nSL: {sl}\nTP: {pos['tp']}\nMargin: {MARGIN_USDT} USDT | Leverage: {LEVERAGE}x | Notional: {NOTIONAL_USDT} USDT\nQty: {qty:.8f}")
+                    fade_txt = "FADE " if rules["invert"] else ""
+                    send_telegram(f"COINDCX PART-02 {session} ORB {fade_txt}{side} PAPER (setup {setup})\n{pair}\nEntry: {c}\nSL: {sl}\nTP: {pos['tp']}\nMargin: {MARGIN_USDT} USDT | Leverage: {LEVERAGE}x | Notional: {NOTIONAL_USDT} USDT\nQty: {qty:.8f}")
             state["last_bar"][key] = stamp
             last_seen = stamp
             continue

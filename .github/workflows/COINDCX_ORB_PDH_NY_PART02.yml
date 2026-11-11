@@ -1,17 +1,21 @@
-# PART-02: inverse (fade) NY-session ORB + PDH/PDL paper trader. Separate from COINDCX_ORB_PDH_NY_SESSION.yml (PART-01).
-# Runs only around the NY session (13:20-21:10 UTC = 18:50-02:40 IST) so it uses far fewer Actions minutes than a 24h loop.
-# A GitHub job can run at most 6h, so the loop ends after ~5.5h and re-dispatches itself while the window is still open.
-# Cron lines are the starters/backups; concurrency keeps a single active run. Paper only: no orders are placed.
-name: CoinDCX ORB PDH NY PART-02 Inverse Paper Trading
+# PART-02: CoinDCX ORB + PDH/PDL paper trader. NY session = inverse (fade) rules, one trade per crypto per day, body 40%.
+# London session = same as the original (PART-01) logic. Separate from COINDCX_ORB_PDH_NY_SESSION.yml (PART-01).
+# Runs only while a session can be open: London open (07:50 UTC in winter / 06:50 UTC in summer) to 21:10 UTC,
+# instead of 24h, so it uses fewer Actions minutes. A GitHub job can run at most 6h, so each run loops ~5.5h and
+# re-dispatches itself while the window is still open. The cron lines are starters/backups; concurrency keeps one
+# active run, and a run started outside the window exits at once. Paper only: no orders are placed.
+name: CoinDCX ORB PDH PART-02 (NY inverse + London) Paper Trading
 
 on:
   workflow_dispatch:
     inputs:
       force_one_cycle:
-        description: "Run exactly one scan cycle even outside the NY window (smoke test)"
+        description: "Run exactly one scan cycle even outside the trading window (smoke test)"
         type: boolean
         default: false
   schedule:
+    - cron: "50 6 * * *"
+    - cron: "50 7 * * *"
     - cron: "20 13 * * *"
     - cron: "5 19 * * *"
 
@@ -49,10 +53,15 @@ jobs:
           python -m pip install pandas numpy requests
       - name: Compile strategy
         run: python -m py_compile "coindcx_orb_pdh_ny_session_PART-02.py"
-      - name: Run PART-02 scanner loop (every 5 min inside the NY window)
+      - name: Run PART-02 scanner loop (every 5 min inside the trading window)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Window start (UTC, HHMM): 10 min before London opens. London is UTC+1 in summer, UTC+0 in winter.
+          window_start() {
+            if [ "$(TZ=Europe/London date +%z)" = "+0100" ]; then echo 650; else echo 750; fi
+          }
 
           persist() {
             for f in orb_pdh_part02_state.json orb_pdh_part02_trades.csv eligible_futures_universe_part02.csv; do
@@ -77,8 +86,8 @@ jobs:
           cycle=0
           while [ "$(date +%s)" -lt "$END" ]; do
             hm=$((10#$(date -u +%H%M)))
-            if [ "$FORCE" != "true" ] && { [ "$hm" -lt 1320 ] || [ "$hm" -ge 2110 ]; }; then
-              echo "Outside the NY window (13:20-21:10 UTC); nothing to do now (UTC time $hm)."
+            if [ "$FORCE" != "true" ] && { [ "$hm" -lt "$(window_start)" ] || [ "$hm" -ge 2110 ]; }; then
+              echo "Outside the trading window ($(window_start)-2110 UTC); nothing to do now (UTC time $hm)."
               break
             fi
             cycle=$((cycle + 1))
@@ -98,12 +107,13 @@ jobs:
             fi
           done
           echo "Loop finished after ${cycle} cycles."
-      - name: Re-dispatch while the NY session is still open
+      - name: Re-dispatch while a session is still open
         if: success() || failure()
         run: |
+          if [ "$(TZ=Europe/London date +%z)" = "+0100" ]; then WS=650; else WS=750; fi
           hm=$((10#$(date -u +%H%M)))
-          if [ "$FORCE" != "true" ] && [ "$hm" -ge 1320 ] && [ "$hm" -lt 2100 ]; then
-            echo "NY window still open (UTC $hm); starting the next run."
+          if [ "$FORCE" != "true" ] && [ "$hm" -ge "$WS" ] && [ "$hm" -lt 2100 ]; then
+            echo "Trading window still open (UTC $hm); starting the next run."
             gh workflow run COINDCX_ORB_PDH_NY_PART02.yml --repo "${{ github.repository }}" --ref main
           else
             echo "No re-dispatch needed (UTC $hm)."
