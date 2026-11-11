@@ -1,3 +1,3 @@
-[I 261111 04:55:00 smartConnect:124] in pool
+[I 261111 05:00:01 smartConnect:124] in pool
 [DATA UNAVAILABLE] Angel One rate limit reached for ADANIENT; remaining symbols deferred to next cycle. Remaining symbols deferred to the next scheduled cycle.
 PAPER STATUS | capital ₹50000.00 | cash ₹50000.00 | reserved ₹0.00 | open positions 0
