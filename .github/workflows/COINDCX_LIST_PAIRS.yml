@@ -1,0 +1,20 @@
+# One-off helper (manual only): prints every active CoinDCX USDT futures pair, unfiltered. Read-only, no secrets.
+name: CoinDCX List Futures Pairs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install requests
+      - run: python -u coindcx_list_pairs.py
