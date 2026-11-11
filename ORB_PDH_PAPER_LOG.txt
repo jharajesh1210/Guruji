@@ -1,8 +1,8 @@
-[I 261111 08:55:01 smartConnect:124] in pool
-[warn] Nifty 50: Angel One rate limit; pausing 20s then retrying (1/3)
-[warn] Nifty 50: Angel One rate limit; pausing 40s then retrying (2/3)
-[warn] ADANIENT: Angel One rate limit; pausing 20s then retrying (1/3)
-[warn] ADANIENT: Angel One rate limit; pausing 40s then retrying (2/3)
+[I 261111 09:00:01 smartConnect:124] in pool
 [warn] ADANIPORTS: Angel One rate limit; pausing 20s then retrying (1/3)
-[DATA UNAVAILABLE] Angel One rate limit reached for ADANIPORTS; remaining symbols continue in the next cycle.
-PAPER STATUS | capital ₹50000.00 | cash ₹50000.00 | reserved ₹0.00 | open positions 0 | symbols scanned 1/50 for candle 14:20 | SCAN INCOMPLETE, continues next cycle
+[warn] APOLLOHOSP: Angel One rate limit; pausing 20s then retrying (1/3)
+[warn] APOLLOHOSP: Angel One rate limit; pausing 40s then retrying (2/3)
+[warn] AXISBANK: Angel One rate limit; pausing 20s then retrying (1/3)
+[warn] AXISBANK: Angel One rate limit; pausing 40s then retrying (2/3)
+[DATA UNAVAILABLE] Angel One rate limit reached for BAJAJ-AUTO; remaining symbols continue in the next cycle.
+PAPER STATUS | capital ₹50000.00 | cash ₹50000.00 | reserved ₹0.00 | open positions 0 | symbols scanned 5/50 for candle 14:25 | SCAN INCOMPLETE, continues next cycle
