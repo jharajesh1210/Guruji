@@ -2,9 +2,9 @@
   "starting_capital": 50000.0,
   "cash": 50000.0,
   "positions": {},
-  "last_processed_candle": "2026-11-11T10:55:00+05:30",
+  "last_processed_candle": "2026-11-11T11:05:00+05:30",
   "trade_count": 0,
   "trade_date": "2026-11-11",
   "traded_symbols": [],
-  "updated_at": "2026-11-11T11:00:00.807597+05:30"
+  "updated_at": "2026-11-11T11:10:00.819552+05:30"
 }
