@@ -3,22 +3,22 @@ PART-02: INVERSE (fade) version of the CoinDCX NY-session ORB + PDH/PDL strategy
 The original file coindcx_orb_pdh_ny_session.py is untouched and keeps running as PART-01.
 
 What is different here (everything else is copied as-is from the original):
-  * NY session ONLY gets the new rules (see SESSION_RULES):
-      - the trade direction is FLIPPED:
-          when the original LONG setup forms (close > max(ORB high, PDH) + volume spike + strong green candle)
-          -> a SHORT is opened at that close;
-          when the original SHORT setup forms (PDH touched, close < ORB low + volume spike + strong red candle)
-          -> a LONG is opened at that close.
-      - risk distance is the original setup's distance (long setup: close - ORB low; short setup: SL - close),
-        mirrored to the other side of the entry:  SHORT sl = entry + risk | LONG sl = entry - risk.
-        Target is still 4R, with the same 2R/3R lock ladder, time stop and pre-close protection.
-      - candle body >= 40% of range (BODY_MIN_NY).
-      - ONE TRADE PER CRYPTO PER DAY: once a pair has had a paper trade in today's NY session (open or already
-        closed by SL / target / time stop), no new NY entry on that pair until the next day
-        (tracked in the state file under "traded_days").
-  * LONDON session is exactly as in the original file: same direction, body >= 50%, no daily limit.
+  * BOTH sessions (NY and London):
+      - candle body >= 40% of range (BODY_MIN = 0.4; the original used 0.5).
+      - ONE TRADE PER CRYPTO PER DAY (per session): once a pair has had a paper trade in today's session
+        (open or already closed by SL / target / time stop), no new entry on that pair in that session until
+        the next day (tracked in the state file under "traded_days").
+  * NY session ONLY: the trade direction is FLIPPED (see SESSION_RULES):
+      when the original LONG setup forms (close > max(ORB high, PDH) + volume spike + strong green candle)
+      -> a SHORT is opened at that close;
+      when the original SHORT setup forms (PDH touched, close < ORB low + volume spike + strong red candle)
+      -> a LONG is opened at that close.
+      Risk distance is the original setup's distance (long setup: close - ORB low; short setup: SL - close),
+      mirrored to the other side of the entry:  SHORT sl = entry + risk | LONG sl = entry - risk.
+      Target is still 4R, with the same 2R/3R lock ladder, time stop and pre-close protection.
+  * LONDON session direction and stops are exactly as in the original file.
   * Separate state / trades / universe files (part02_*) so it never mixes with PART-01.
-    (London therefore runs in BOTH files with the same logic; the alerts say PART-02.)
+    (London therefore runs in BOTH files; the alerts say PART-02.)
 
 ----- original description (setup detection is unchanged) -----
 CoinDCX Futures ORB + PDH/PDL (Long & Short), NY and London sessions
@@ -30,11 +30,11 @@ Each session uses its own ORB and previous session levels. London adjusts automa
                    Entries are only allowed after the ORB is complete (13:45 UTC onwards).
 - PDH / PDL      : high / low of the PREVIOUS NY session (same window), not the 24h UTC day.
 - Volume spike   : candle volume >= 2x average of the previous 20 candles (current candle excluded).
-- LONG  (A)      : close > max(ORB high, PDH), volume spike, green candle, body >= BODY_MIN (50%) of range,
+- LONG  (A)      : close > max(ORB high, PDH), volume spike, green candle, body >= BODY_MIN (40% in PART-02) of range,
                    close in TOP 25% of the candle range (CLOSE_EXTREME_PCT).
                    SL = ORB low.
 - SHORT (B)      : PDH touched in session, close < ORB low, session high < PDH * 1.01, volume spike,
-                   red candle, body >= BODY_MIN (50%) of range,
+                   red candle, body >= BODY_MIN (40% in PART-02) of range,
                    close in BOTTOM 25% of the candle range.   SL = session high so far * 1.001.
 - Stop ladder    : 2R reached -> SL locks +2R | 3R reached -> SL locks +3R | 4R -> final target exit.
                    Each candle is checked against the SL that was in force at the START of that candle
@@ -110,12 +110,11 @@ ORB_CANDLES = 3              # 3 x 5m = 15 min
 VOL_MULT = 2.0
 VOL_LOOKBACK = 20
 CLOSE_EXTREME_PCT = 0.25     # LONG: close in top 25% of candle range; SHORT: close in bottom 25%
-BODY_MIN = 0.5               # original value: candle body must be >= 50% of its range (London uses this)
-BODY_MIN_NY = 0.4            # PART-02: NY candle body must be >= 40% of its range
-# Per-session behaviour. London = original behaviour. NY = PART-02 changes.
+BODY_MIN = 0.4               # PART-02: candle body must be >= 40% of its range (PART-01 original: 0.5)
+# Per-session behaviour. Both sessions: body 40% + max 1 trade per pair per day. Only NY flips the direction.
 SESSION_RULES = {
-    "NY":     {"invert": True,  "body_min": BODY_MIN_NY, "one_trade_per_day": True},
-    "LONDON": {"invert": False, "body_min": BODY_MIN,    "one_trade_per_day": False},
+    "NY":     {"invert": True,  "body_min": BODY_MIN, "one_trade_per_day": True},
+    "LONDON": {"invert": False, "body_min": BODY_MIN, "one_trade_per_day": True},
 }
 TARGET_R = 4.0
 SHORT_SL_BUFFER = 0.001

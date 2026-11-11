@@ -1,5 +1,6 @@
-# PART-02: CoinDCX ORB + PDH/PDL paper trader. NY session = inverse (fade) rules, one trade per crypto per day, body 40%.
-# London session = same as the original (PART-01) logic. Separate from COINDCX_ORB_PDH_NY_SESSION.yml (PART-01).
+# PART-02: CoinDCX ORB + PDH/PDL paper trader. Both sessions: candle body 40% and max one trade per crypto per day.
+# NY session also flips the direction (inverse/fade); London keeps the original direction.
+# Separate from COINDCX_ORB_PDH_NY_SESSION.yml (PART-01).
 # Runs only while a session can be open: London open (07:50 UTC in winter / 06:50 UTC in summer) to 21:10 UTC,
 # instead of 24h, so it uses fewer Actions minutes. A GitHub job can run at most 6h, so each run loops ~5.5h and
 # re-dispatches itself while the window is still open. The cron lines are starters/backups; concurrency keeps one
