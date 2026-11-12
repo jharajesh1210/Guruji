@@ -1,7 +1,1 @@
-[I 261112 09:55:00 smartConnect:124] in pool
-[warn] ADANIPORTS: Angel One rate limit; pausing 20s then retrying (1/3)
-[warn] ADANIPORTS: Angel One rate limit; pausing 40s then retrying (2/3)
-[warn] ADANIPORTS: Angel One rate limit; pausing 60s then retrying (3/3)
-[DATA UNAVAILABLE] Angel One rate limit reached for ADANIPORTS; remaining symbols continue in the next cycle.
-PAPER STATUS | capital ₹50000.00 | cash ₹7182.89 | reserved ₹42783.70 | open positions 1 | symbols scanned 0/50 for candle 15:20 | SCAN INCOMPLETE, continues next cycle
-Telegram alert sent.
+Outside NSE market hours (09:15-15:30 IST); no API calls. Current time: 15:30:01
