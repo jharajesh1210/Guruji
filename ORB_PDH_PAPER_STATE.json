@@ -27,14 +27,14 @@
       "entry_time": "2026-11-12T10:00:00+05:30"
     }
   },
-  "last_processed_candle": "2026-11-12T14:55:00+05:30",
+  "last_processed_candle": "2026-11-12T15:05:00+05:30",
   "trade_count": 0,
   "trade_date": "2026-11-12",
   "traded_symbols": [
     "ADANIENT",
     "ADANIPORTS"
   ],
-  "updated_at": "2026-11-12T15:00:00.800567+05:30",
-  "scan_candle": "2026-11-12T14:55:00+05:30",
+  "updated_at": "2026-11-12T15:10:00.724525+05:30",
+  "scan_candle": "2026-11-12T15:05:00+05:30",
   "scan_done": []
 }
