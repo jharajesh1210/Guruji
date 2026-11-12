@@ -6,11 +6,14 @@
   "trade_count": 0,
   "trade_date": "2026-11-12",
   "traded_symbols": [],
-  "updated_at": "2026-11-12T09:35:01.049059+05:30",
-  "scan_candle": "2026-11-12T09:30:00+05:30",
+  "updated_at": "2026-11-12T09:45:00.769686+05:30",
+  "scan_candle": "2026-11-12T09:40:00+05:30",
   "scan_done": [
     "ADANIENT",
     "ADANIPORTS",
-    "APOLLOHOSP"
+    "APOLLOHOSP",
+    "ASIANPAINT",
+    "AXISBANK",
+    "BAJAJ-AUTO"
   ]
 }
