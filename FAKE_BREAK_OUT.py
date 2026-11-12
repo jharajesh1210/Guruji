@@ -1,39 +1,35 @@
 """
-PART-03: FAKE BREAKOUT version of the CoinDCX ORB + PDH/PDL strategy (NY + London sessions).
+PART-03: PART-02 + FAKE BREAKOUT FILTER (CoinDCX ORB + PDH/PDL, NY and London sessions).
 PART-01 and PART-02 files are untouched and keep running; this file has its own state / trades / universe files.
 
-Everything is copied from PART-02 (universe filter, candle fetch, sessions, ORB, PDH/PDL, setup detection,
-volume spike, candle-body rule, 1 trade per pair per session per day, 4R target with 2R/3R lock ladder,
-time stop, pre-close protection, fees, paper-trade bookkeeping) EXCEPT the entry logic:
+EVERYTHING is exactly as in PART-02 (universe filter, candle fetch, sessions, ORB, PDH/PDL, setup detection,
+volume spike, candle body >= 40%, close at the candle extreme, one trade per pair per session per day,
+NY direction flipped / London original direction, stop and risk formulas, 4R target with 2R/3R lock ladder,
+time stop, pre-close protection, 90-min entry cutoff, fees, paper-trade bookkeeping, CSV columns)
+EXCEPT ONE THING: the PART-02 entry is no longer taken on the breakout candle itself. It is taken only after
+the next candles tell us whether the breakout was FAKE or REAL, and only if that supports the trade direction.
 
-  PART-02 : NY entered the opposite side of the breakout candle immediately at its close (stop = mirrored risk),
-            London entered the breakout direction.
-  PART-03 : BOTH sessions trade only a CONFIRMED FAKE BREAKOUT.
+HOW THE FILTER WORKS (SESSION_RULES[...]["filter"])
+  Breakout candle = the PART-02 setup candle:
+      UP   : PART-02 "long setup"  (close > max(ORB high, PDH) ...)   level = max(ORB high, PDH)
+      DOWN : PART-02 "short setup" (PDH touched, close < ORB low ...) level = ORB low
+  A candle is a "FAKE candle" when it closes BACK INSIDE the level (UP: close < level, DOWN: close > level),
+  is coloured opposite to the breakout and has a body >= FAKE_CONFIRM_BODY_MIN of its range.
+  The watch lasts FAKE_WINDOW_CANDLES closed candles (3 x 5m = 15 min) after the breakout candle.
 
-FAKE BREAKOUT RULE
-  1) A breakout candle is detected exactly as in PART-02 (volume spike, strong body, close at the candle extreme):
-       UP   : close > max(ORB high, PDH)                    -> level = max(ORB high, PDH)
-       DOWN : PDH touched, close < ORB low (PART-02 filters)  -> level = ORB low
-     No trade is opened on this candle. It only arms a "pending" fake-breakout watch.
-  2) Within the next FAKE_WINDOW_CANDLES closed candles, a candle must CLOSE BACK INSIDE the broken level
-     (UP breakout: close < level, DOWN breakout: close > level), with a strong opposite-coloured body
-     (>= FAKE_CONFIRM_BODY_MIN of its range). That candle confirms the fake breakout.
-       -> entry at the close of the confirming candle, in the OPPOSITE direction of the breakout:
-            fake UP breakout   -> SHORT
-            fake DOWN breakout -> LONG
-  3) STOP is placed beyond the spike extreme (highest high / lowest low from the breakout candle up to the
-     confirming candle) +/- FAKE_SL_BUFFER, so the wick that traps the breakout traders is not what stops us.
-     risk (1R) = distance entry -> stop.  Target 4R, same 2R/3R lock ladder as PART-02.
-  4) If no confirming candle arrives within the window, the breakout is treated as REAL and nothing is traded.
+  "FAKE"  (NY, direction flipped / fade):  PART-02 NY trade is taken only if the breakout turns out FAKE.
+          Entry = close of the first FAKE candle. If no FAKE candle appears in the window the breakout was real -> no trade.
+          (UP breakout -> SHORT, DOWN breakout -> LONG, exactly the PART-02 NY mapping.)
+  "REAL"  (London, original direction):    PART-02 London trade is taken only if the breakout HOLDS.
+          If a FAKE candle appears in the window the breakout failed -> no trade.
+          Otherwise entry = close of the last candle of the window.
+          (UP breakout -> LONG, DOWN breakout -> SHORT, exactly the PART-02 London mapping.)
+  "NONE"  no filter: entry on the breakout candle itself = PART-02 behaviour (use it to check that this file
+          reproduces PART-02 exactly).
 
-EXTRA FILTERS (all configurable below)
-  * MIN_RISK_PCT / MAX_RISK_PCT : skip trades whose stop distance is too small (fees + noise dominate)
-    or too large (at 30x leverage a ~3.3% adverse move is liquidation in real trading).
-  * ENTRY_CUTOFF_MIN_BEFORE_END : no new entries in the last 120 min of the session.
-  * NO_PROGRESS exit : if after NO_PROGRESS_CANDLES candles the trade never reached +NO_PROGRESS_MIN_R,
-    exit at that candle's close (dead trades only pay fees).
-  * mfe_r / mae_r columns in the trades CSV (best / worst excursion in R, approximate: uses candle high/low)
-    so time stops and stops can be tuned from data later. Also "setup" and "risk_pct" columns.
+  At entry time risk / stop / target are computed with the SAME PART-02 formulas on the entry candle's close:
+      long setup : risk = close - ORB low;           NY SHORT sl = close + risk | London LONG sl = ORB low
+      short setup: sl0 = session high * (1+0.1%), risk = sl0 - close;  NY LONG sl = close - risk | London SHORT sl = sl0
 
 PAPER TRADING ONLY. This script never places real orders and has no API key / order-placement code.
 It only reads public CoinDCX market data, tracks simulated positions in fake_break_out_state.json
@@ -90,41 +86,37 @@ def fetch_eligible_futures_pairs():
     return eligible
 
 
-# ----------------------------- CONFIG -----------------------------
+# ----------------------------- CONFIG (same values as PART-02) -----------------------------
 RUN_SESSIONS = ["NY", "LONDON"]
 CANDLE_MIN = 5
 ORB_CANDLES = 3              # 3 x 5m = 15 min
 VOL_MULT = 2.0
 VOL_LOOKBACK = 20
-CLOSE_EXTREME_PCT = 0.25     # UP breakout: close in top 25% of candle range; DOWN: bottom 25%
-BODY_MIN = 0.4               # breakout candle body must be >= 40% of its range
-# Both sessions use the same fake-breakout logic and the same "max 1 trade per pair per day" rule.
+CLOSE_EXTREME_PCT = 0.25     # LONG setup: close in top 25% of candle range; SHORT setup: bottom 25%
+BODY_MIN = 0.4               # candle body must be >= 40% of its range
+# Same as PART-02: only NY flips the direction; both sessions max 1 trade per pair per day.
+# "filter" is the ONLY new thing in PART-03: "FAKE" | "REAL" | "NONE" (see docstring).
 SESSION_RULES = {
-    "NY":     {"body_min": BODY_MIN, "one_trade_per_day": True},
-    "LONDON": {"body_min": BODY_MIN, "one_trade_per_day": True},
+    "NY":     {"invert": True,  "body_min": BODY_MIN, "one_trade_per_day": True, "filter": "FAKE"},
+    "LONDON": {"invert": False, "body_min": BODY_MIN, "one_trade_per_day": True, "filter": "REAL"},
 }
 TARGET_R = 4.0
+SHORT_SL_BUFFER = 0.001
 FEE_PCT_PER_SIDE = 0.05      # taker fee estimate, % of notional per side
 MIN_SESSION_FILL = 0.95      # share of expected candles a session needs to count as complete
 
-# --- Fake breakout settings ---
-FAKE_WINDOW_CANDLES = 3          # confirming candle must close back inside within this many candles (3 x 5m = 15 min)
-FAKE_CONFIRM_BODY_MIN = BODY_MIN # confirming candle body must be >= this share of its range
-FAKE_NEED_OPPOSITE_COLOR = True  # confirming candle must be red (fake UP) / green (fake DOWN)
-FAKE_SL_BUFFER = 0.001           # stop = spike extreme +/- 0.1%
-MIN_RISK_PCT = 0.8               # skip if stop distance < 0.8% of entry (fees + noise dominate)
-MAX_RISK_PCT = 3.0               # skip if stop distance > 3% of entry (30x leverage liquidates near 3.3%)
-
-# --- Session-end / dead-trade handling ---
-ENTRY_CUTOFF_MIN_BEFORE_END = 120   # no NEW entries in the last 120 min of the session
-MAX_HOLD_CANDLES = 24               # 24 x 5m = 2 hours
-TIME_STOP_MIN_R = 1.0               # time stop if still below this R (at close) after MAX_HOLD_CANDLES
-NO_PROGRESS_CANDLES = 12            # 12 x 5m = 60 min; set 0 to disable
-NO_PROGRESS_MIN_R = 0.5             # exit if best excursion (MFE) is still below this R after NO_PROGRESS_CANDLES
-PROTECT_MIN_BEFORE_END = 45         # in the last 45 min a profitable trade gets its SL moved up; 0 disables
+ENTRY_CUTOFF_MIN_BEFORE_END = 90
+MAX_HOLD_CANDLES = 24        # 24 x 5m = 2 hours
+TIME_STOP_MIN_R = 1.0
+PROTECT_MIN_BEFORE_END = 45
 PROTECT_MIN_R = 0.5
-PROTECT_LOCK_R = 0.0                # 0.0 = breakeven
-# -------------------------------------------------------------------
+PROTECT_LOCK_R = 0.0         # 0.0 = breakeven
+
+# --- Fake breakout filter settings (new in PART-03) ---
+FAKE_WINDOW_CANDLES = 3          # candles watched after the breakout candle (3 x 5m = 15 min)
+FAKE_CONFIRM_BODY_MIN = BODY_MIN # a FAKE candle must have a body >= this share of its range
+FAKE_NEED_OPPOSITE_COLOR = True  # FAKE candle must be red after an UP breakout / green after a DOWN breakout
+# -------------------------------------------------------------------------------------------
 
 STATE_FILE = "fake_break_out_state.json"
 TRADES_FILE = "fake_break_out_trades.csv"
@@ -234,25 +226,41 @@ def save_state(state):
 
 
 def _record_exit(state, key, pair, session, pos, exit_price, exit_time, reason):
-    """Close a paper position: build the trade row, store it, alert, and remove the position."""
+    """Close a paper position (same trade row / CSV columns as PART-02) and alert."""
     entry, risk = float(pos["entry"]), float(pos["risk"])
     trade = _close_trade(pos["side"], entry, risk, exit_price, pos["t0"], exit_time, reason)
     per_r_usdt = risk * (NOTIONAL_USDT / entry)
-    trade.update({
-        "pair": pair, "session": session, "margin_usdt": MARGIN_USDT, "leverage": LEVERAGE,
-        "notional_usdt": NOTIONAL_USDT,
-        "pnl_usdt_gross": trade["r_gross"] * per_r_usdt,
-        "pnl_usdt_net": trade["r_net"] * per_r_usdt,
-        "setup": pos.get("setup"),
-        "risk_pct": risk / entry * 100,
-        "mfe_r": round(float(pos.get("mfe_r", 0.0)), 3),
-        "mae_r": round(float(pos.get("mae_r", 0.0)), 3),
-    })
+    trade.update({"pair": pair, "session": session, "margin_usdt": MARGIN_USDT, "leverage": LEVERAGE,
+                  "notional_usdt": NOTIONAL_USDT,
+                  "pnl_usdt_gross": trade["r_gross"] * per_r_usdt,
+                  "pnl_usdt_net": trade["r_net"] * per_r_usdt})
     state["trades"].append(trade)
     send_telegram(f"COINDCX PART-03 FAKE_BREAK_OUT {session} {pos['side']} PAPER EXIT\n{pair}\nExit: {exit_price}\n"
                   f"Reason: {reason}\nNet PnL est.: {trade['pnl_usdt_net']:.4f} USDT")
     state["positions"].pop(key, None)
     return trade
+
+
+def _build_entry(direction, c, orb_low, run_high, invert):
+    """PART-02 side / stop / risk formulas, evaluated at close c.
+    direction UP = PART-02 'long setup', DOWN = PART-02 'short setup'.
+    Returns (side, setup, sl, risk) or None."""
+    if direction == "UP":
+        risk = c - orb_low
+        if risk <= 0:
+            return None
+        if invert:      # NY: long breakout setup -> SHORT (stop mirrored above the entry)
+            return "SHORT", "LONG_BREAKOUT", c + risk, risk
+        return "LONG", "LONG_BREAKOUT", orb_low, risk     # London: original behaviour
+    sl0 = run_high * (1 + SHORT_SL_BUFFER)
+    risk = sl0 - c
+    if risk <= 0:
+        return None
+    if invert:          # NY: short breakdown setup -> LONG (stop mirrored below the entry)
+        if c - risk > 0:
+            return "LONG", "SHORT_BREAKDOWN", c - risk, risk
+        return None
+    return "SHORT", "SHORT_BREAKDOWN", sl0, risk           # London: original behaviour
 
 
 def live_process_pair(pair, state, session, data=None, now=None):
@@ -264,7 +272,7 @@ def live_process_pair(pair, state, session, data=None, now=None):
     d = data.copy()
     d["vol_avg"] = d["volume"].rolling(VOL_LOOKBACK, min_periods=VOL_LOOKBACK).mean().shift(1)
     # For live mode, today's session is intentionally partial; only the prior
-    # session must pass the complete-session validation.
+    # session must pass the original complete-session validation.
     now = now or datetime.now(timezone.utc)
     cfg = SESSION_CONFIG[session]
     rules = SESSION_RULES[session]
@@ -293,6 +301,7 @@ def live_process_pair(pair, state, session, data=None, now=None):
     pending = state.setdefault("pending", {})           # armed fake-breakout watches
     pos = state["positions"].get(key)
     last_seen = state["last_bar"].get(key)
+    mode = rules.get("filter", "NONE")
 
     # At/after the session close, flatten any remaining paper position at the
     # final available session candle close; do not create late entries.
@@ -302,6 +311,30 @@ def live_process_pair(pair, state, session, data=None, now=None):
             last = g.iloc[-1]
             _record_exit(state, key, pair, session, pos, float(last["close"]), g.index[-1].isoformat(), "SESSION_END")
         return
+
+    def open_position(direction, c, stamp, left, orb_low, run_high, note):
+        """Open the PART-02 trade for this breakout direction at close c. Returns the position or None."""
+        if left <= ENTRY_CUTOFF_MIN_BEFORE_END:          # no late entries (PART-02 rule, applied at entry time)
+            print(f"[{session}] {pair} {note}: too late in session - skipped")
+            return None
+        built = _build_entry(direction, c, orb_low, run_high, rules["invert"])
+        if built is None:
+            return None
+        side, setup, sl, risk = built
+        p = {"side": side, "setup": setup, "entry": c, "sl": float(sl), "risk": float(risk),
+             "tp": float(c + TARGET_R * risk if side == "LONG" else c - TARGET_R * risk),
+             "t0": stamp, "entry_bar": stamp, "pdh": pdh, "orb_high": orb_high,
+             "orb_low": orb_low, "margin": MARGIN_USDT, "leverage": LEVERAGE,
+             "notional": NOTIONAL_USDT, "session": session}
+        state["positions"][key] = p
+        traded_days[key] = today_iso
+        qty = NOTIONAL_USDT / c
+        fade_txt = "FADE " if rules["invert"] else ""
+        send_telegram(f"COINDCX PART-03 FAKE_BREAK_OUT {session} ORB {fade_txt}{side} PAPER (setup {setup}, {note})\n"
+                      f"{pair}\nEntry: {c}\nSL: {sl}\nTP: {p['tp']}\n"
+                      f"Margin: {MARGIN_USDT} USDT | Leverage: {LEVERAGE}x | Notional: {NOTIONAL_USDT} USDT\n"
+                      f"Qty: {qty:.8f}")
+        return p
 
     # Process only fully closed 5-minute bars, and never replay a bar after an Actions rerun.
     closed = g.iloc[:-1]
@@ -317,11 +350,12 @@ def live_process_pair(pair, state, session, data=None, now=None):
             last_seen = stamp
             continue
         o, h, l, c, v = map(float, (bar["open"], bar["high"], bar["low"], bar["close"], bar["volume"]))
+        # Setup calculations and thresholds are unchanged from PART-02.
         upto = g.loc[:ts]
         run_high = float(upto["high"].max())
         left = mins_to_session_end(ts, session)
 
-        # ------------------------- no open position: fake-breakout engine -------------------------
+        # ------------------------- no open position -------------------------
         if pos is None:
             pend = pending.get(key)
             if pend and pend.get("day") != today_iso:       # stale watch from a previous day
@@ -335,88 +369,63 @@ def live_process_pair(pair, state, session, data=None, now=None):
 
             rng = h - l
             body_ratio = abs(c - o) / rng if rng > 0 else 0.0
-            va = bar["vol_avg"]
-            spike = (not pd.isna(va)) and v >= VOL_MULT * float(va)
 
-            # (1) is this candle the confirmation of an armed fake breakout?
+            # (1) an armed watch: is this candle a FAKE candle, and is the window over?
             if pend:
                 up = pend["dir"] == "UP"
                 pend["bars"] += 1
-                pend["extreme"] = max(float(pend["extreme"]), h) if up else min(float(pend["extreme"]), l)
                 back_inside = (c < float(pend["level"])) if up else (c > float(pend["level"]))
                 color_ok = (c < o) if up else (c > o)
-                confirmed = (back_inside and body_ratio >= FAKE_CONFIRM_BODY_MIN
-                             and (color_ok or not FAKE_NEED_OPPOSITE_COLOR))
-                if confirmed:
-                    extreme = float(pend["extreme"])
-                    if up:       # fake UP breakout -> SHORT, stop above the spike high
-                        side, setup, sl = "SHORT", "FAKE_UP_BREAKOUT", extreme * (1 + FAKE_SL_BUFFER)
-                        risk = sl - c
-                    else:        # fake DOWN breakout -> LONG, stop below the spike low
-                        side, setup, sl = "LONG", "FAKE_DOWN_BREAKOUT", extreme * (1 - FAKE_SL_BUFFER)
-                        risk = c - sl
-                    risk_pct = risk / c * 100 if risk > 0 else 0.0
-                    if left <= ENTRY_CUTOFF_MIN_BEFORE_END:
-                        print(f"[{session}] {pair} fake breakout confirmed but too late in session - skipped")
-                    elif not (MIN_RISK_PCT <= risk_pct <= MAX_RISK_PCT):
-                        print(f"[{session}] {pair} fake breakout skipped: risk {risk_pct:.2f}% outside "
-                              f"{MIN_RISK_PCT}-{MAX_RISK_PCT}%")
+                fake_candle = (back_inside and body_ratio >= FAKE_CONFIRM_BODY_MIN
+                               and (color_ok or not FAKE_NEED_OPPOSITE_COLOR))
+                window_over = pend["bars"] >= FAKE_WINDOW_CANDLES
+                take = False
+                if mode == "FAKE":
+                    if fake_candle:
+                        take, note = True, "fake breakout confirmed"
+                    elif window_over:
+                        print(f"[{session}] {pair} breakout held {FAKE_WINDOW_CANDLES} candles (real) - no fade trade")
+                        pending.pop(key, None)
                     else:
-                        tp = c + TARGET_R * risk if side == "LONG" else c - TARGET_R * risk
-                        pos = {"side": side, "setup": setup, "entry": c, "sl": float(sl), "risk": float(risk),
-                               "tp": float(tp), "t0": stamp, "entry_bar": stamp, "pdh": pdh,
-                               "orb_high": orb_high, "orb_low": orb_low,
-                               "level": float(pend["level"]), "spike_extreme": extreme,
-                               "margin": MARGIN_USDT, "leverage": LEVERAGE, "notional": NOTIONAL_USDT,
-                               "session": session, "mfe_r": 0.0, "mae_r": 0.0}
-                        state["positions"][key] = pos
-                        traded_days[key] = today_iso
-                        qty = NOTIONAL_USDT / c
-                        send_telegram(f"COINDCX PART-03 FAKE_BREAK_OUT {session} {side} PAPER ({setup})\n{pair}\n"
-                                      f"Entry: {c}\nSL: {sl}\nTP: {tp}\nLevel: {pend['level']}\n"
-                                      f"Spike extreme: {extreme}\nRisk: {risk_pct:.2f}%\n"
-                                      f"Margin: {MARGIN_USDT} USDT | Leverage: {LEVERAGE}x | Notional: {NOTIONAL_USDT} USDT\n"
-                                      f"Qty: {qty:.8f}")
+                        pending[key] = pend
+                elif mode == "REAL":
+                    if fake_candle:
+                        print(f"[{session}] {pair} breakout failed (fake) - trade skipped")
+                        pending.pop(key, None)
+                    elif window_over:
+                        take, note = True, "breakout held"
+                    else:
+                        pending[key] = pend
+                if take:
                     pending.pop(key, None)
-                    pend = None
-                elif pend["bars"] >= FAKE_WINDOW_CANDLES:
-                    print(f"[{session}] {pair} breakout held for {FAKE_WINDOW_CANDLES} candles - treated as real, no trade")
-                    pending.pop(key, None)
-                    pend = None
-                else:
-                    pending[key] = pend
+                    pos = open_position(pend["dir"], c, stamp, left, orb_low, run_high, note)
 
-            # (2) is this candle itself a new breakout candle? (setup detection identical to PART-02)
-            if pos is None:
-                strong = body_ratio >= rules["body_min"]
-                if strong and spike:
+            # (2) is this candle itself a breakout candle? (setup detection identical to PART-02)
+            if pos is None and (key not in pending):
+                strong = rng > 0 and body_ratio >= rules["body_min"]
+                va = bar["vol_avg"]
+                spike = (not pd.isna(va)) and v >= VOL_MULT * float(va)
+                if strong and spike and left > ENTRY_CUTOFF_MIN_BEFORE_END:
                     long_ok = c > max(orb_high, pdh) and c > o and (c - l) / rng >= 1 - CLOSE_EXTREME_PCT
                     short_ok = (run_high >= pdh * 0.999 and c < orb_low and run_high < pdh * 1.01
                                 and c < o and (h - c) / rng >= 1 - CLOSE_EXTREME_PCT)
                     new_dir = "UP" if long_ok else ("DOWN" if short_ok else None)
                     if new_dir:
-                        level = max(orb_high, pdh) if new_dir == "UP" else orb_low
-                        old = pending.get(key)
-                        if old and old["dir"] == new_dir:      # same-direction repeat: keep the spike extreme
-                            extreme = max(float(old["extreme"]), h) if new_dir == "UP" else min(float(old["extreme"]), l)
+                        if mode == "NONE":                    # no filter: PART-02 behaviour
+                            pos = open_position(new_dir, c, stamp, left, orb_low, run_high, "no filter")
                         else:
-                            extreme = h if new_dir == "UP" else l
-                        pending[key] = {"dir": new_dir, "level": float(level), "extreme": float(extreme),
-                                        "bars": 0, "t_break": stamp, "day": today_iso}
-                        print(f"[{session}] {pair} {new_dir} breakout candle at {stamp} - watching for a fake "
-                              f"(level {level})")
+                            level = max(orb_high, pdh) if new_dir == "UP" else orb_low
+                            pending[key] = {"dir": new_dir, "level": float(level), "bars": 0,
+                                            "t_break": stamp, "day": today_iso}
+                            print(f"[{session}] {pair} {new_dir} breakout candle at {stamp} - watching "
+                                  f"{FAKE_WINDOW_CANDLES} candles (filter {mode}, level {level})")
             state["last_bar"][key] = stamp
             last_seen = stamp
             continue
 
-        # ------------------------- open position management -------------------------
+        # ------------------------- open position management (same as PART-02) -------------------------
         side, entry, risk, sl, tp = pos["side"], float(pos["entry"]), float(pos["risk"]), float(pos["sl"]), float(pos["tp"])
         is_long = side == "LONG"
-        fav = ((h - entry) if is_long else (entry - l)) / risk      # best excursion this candle, in R
-        adv = ((entry - l) if is_long else (h - entry)) / risk      # worst excursion this candle, in R
-        pos["mfe_r"] = max(float(pos.get("mfe_r", 0.0)), fav)
-        pos["mae_r"] = max(float(pos.get("mae_r", 0.0)), adv)
-
         hit_sl = (l <= sl) if is_long else (h >= sl)
         hit_tp = (h >= tp) if is_long else (l <= tp)
         if hit_sl or hit_tp:
@@ -428,21 +437,17 @@ def live_process_pair(pair, state, session, data=None, now=None):
         else:
             close_r = ((c - entry) if is_long else (entry - c)) / risk
             held = int((ts - pd.Timestamp(pos["entry_bar"])).total_seconds() // (CANDLE_MIN * 60))
-            exit_reason = None
-            if NO_PROGRESS_CANDLES and held >= NO_PROGRESS_CANDLES and float(pos["mfe_r"]) < NO_PROGRESS_MIN_R:
-                exit_reason = "NO_PROGRESS"
-            elif held >= MAX_HOLD_CANDLES and close_r < TIME_STOP_MIN_R:
-                exit_reason = "TIME_STOP"
-            if exit_reason:
-                _record_exit(state, key, pair, session, pos, c, stamp, exit_reason)
+            if held >= MAX_HOLD_CANDLES and close_r < TIME_STOP_MIN_R:    # time stop
+                _record_exit(state, key, pair, session, pos, c, stamp, "TIME_STOP")
                 pos = None
                 state["last_bar"][key] = stamp
                 last_seen = stamp
                 continue
+            r_now = ((h - entry) if is_long else (entry - l)) / risk
             new_sl = sl
-            if fav >= 3.0:
+            if r_now >= 3.0:
                 new_sl = entry + 3.0 * risk if is_long else entry - 3.0 * risk
-            elif fav >= 2.0:
+            elif r_now >= 2.0:
                 new_sl = entry + 2.0 * risk if is_long else entry - 2.0 * risk
             if PROTECT_MIN_BEFORE_END and left <= PROTECT_MIN_BEFORE_END and close_r >= PROTECT_MIN_R:
                 lock = entry + PROTECT_LOCK_R * risk if is_long else entry - PROTECT_LOCK_R * risk
@@ -475,7 +480,7 @@ def run_live_paper():
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="CoinDCX FAKE BREAKOUT (ORB + PDH/PDL) NY/London session PAPER trading (no real orders)")
+    ap = argparse.ArgumentParser(description="CoinDCX PART-02 + FAKE BREAKOUT filter, NY/London session PAPER trading (no real orders)")
     ap.add_argument("--mode", default="live-paper", choices=["live-paper"],
                     help="Run mode (only live-paper exists; the GitHub workflow passes --mode live-paper)")
     ap.parse_args()
