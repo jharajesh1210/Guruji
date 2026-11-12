@@ -1,7 +1,10 @@
-[I 261112 04:15:00 smartConnect:124] in pool
+[I 261112 04:20:01 smartConnect:124] in pool
 [warn] Nifty 50: Angel One rate limit; pausing 20s then retrying (1/3)
-[warn] AXISBANK: Angel One rate limit; pausing 20s then retrying (1/3)
-[warn] BAJFINANCE: Angel One rate limit; pausing 20s then retrying (1/3)
-[warn] BAJFINANCE: Angel One rate limit; pausing 40s then retrying (2/3)
-[DATA UNAVAILABLE] Angel One rate limit reached for BAJFINANCE; remaining symbols continue in the next cycle.
-PAPER STATUS | capital ₹50000.00 | cash ₹50000.00 | reserved ₹0.00 | open positions 0 | symbols scanned 6/50 for candle 09:40 | SCAN INCOMPLETE, continues next cycle
+[warn] Nifty 50: Angel One rate limit; pausing 40s then retrying (2/3)
+[PAPER ENTRY] ADANIPORTS LONG qty=22.169 entry=1929.90 SL=1907.35 target=2020.12
+[warn] APOLLOHOSP: Angel One rate limit; pausing 20s then retrying (1/3)
+[warn] ASIANPAINT: Angel One rate limit; pausing 20s then retrying (1/3)
+[warn] ASIANPAINT: Angel One rate limit; pausing 40s then retrying (2/3)
+[DATA UNAVAILABLE] Angel One rate limit reached for ASIANPAINT; remaining symbols continue in the next cycle.
+PAPER STATUS | capital ₹50000.00 | cash ₹7216.30 | reserved ₹42783.70 | open positions 1 | symbols scanned 3/50 for candle 09:45 | SCAN INCOMPLETE, continues next cycle
+Telegram alert sent.

@@ -1,19 +1,31 @@
 {
   "starting_capital": 50000.0,
-  "cash": 50000.0,
-  "positions": {},
+  "cash": 7216.299439349175,
+  "positions": {
+    "ADANIPORTS": {
+      "symbol": "ADANIPORTS",
+      "side": "LONG",
+      "entry": 1929.9,
+      "sl": 1907.3458500000002,
+      "target": 2020.1165999999998,
+      "risk": 22.554149999999936,
+      "lock_stage": 0,
+      "qty": 22.168869143816167,
+      "notional": 42783.700560650825,
+      "entry_time": "2026-11-12T09:45:00+05:30"
+    }
+  },
   "last_processed_candle": "2026-11-11T15:20:00+05:30",
   "trade_count": 0,
   "trade_date": "2026-11-12",
-  "traded_symbols": [],
-  "updated_at": "2026-11-12T09:45:00.769686+05:30",
-  "scan_candle": "2026-11-12T09:40:00+05:30",
+  "traded_symbols": [
+    "ADANIPORTS"
+  ],
+  "updated_at": "2026-11-12T09:50:01.081957+05:30",
+  "scan_candle": "2026-11-12T09:45:00+05:30",
   "scan_done": [
     "ADANIENT",
     "ADANIPORTS",
-    "APOLLOHOSP",
-    "ASIANPAINT",
-    "AXISBANK",
-    "BAJAJ-AUTO"
+    "APOLLOHOSP"
   ]
 }
