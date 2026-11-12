@@ -1,1 +1,2 @@
-
+entry_time,exit_time,side,entry,exit,risk,r_gross,r_net,reason,pair,session,margin_usdt,leverage,notional_usdt,pnl_usdt_gross,pnl_usdt_net
+2026-11-12T08:45:00+00:00,2026-11-12T10:20:00+00:00,SHORT,19.583,19.849829999999997,0.2668299999999988,-1.0,-1.0733912978300795,SL,B-VVV_USDT,LONDON,100.0,30.0,3000.0,-40.876780881376526,-43.876780881376526
