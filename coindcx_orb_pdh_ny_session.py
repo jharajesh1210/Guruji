@@ -3,9 +3,9 @@ CoinDCX Futures ORB + PDH/PDL (Long & Short), NY and London sessions
 -------------------------------------------------------------
 Each session uses its own ORB and previous session levels. London adjusts automatically for BST/GMT:
 
-- Session        : SESSION_START .. SESSION_END (UTC). Default 13:30 - 21:00 UTC (19:00 IST onwards).
-- ORB            : first 3 five-minute candles of the session (13:30, 13:35, 13:40 UTC) -> ORB high / low.
-                   Entries are only allowed after the ORB is complete (13:45 UTC onwards).
+- Session        : NY = 09:30 - 16:00 America/New_York (DST-aware, 14:30-21:00 UTC in winter); London and others see SESSION_CONFIG.
+- ORB            : first 3 five-minute candles of the session (NY: 09:30, 09:35, 09:40 ET) -> ORB high / low.
+                   Entries are only allowed after the ORB is complete (NY: 09:45 ET onwards).
 - PDH / PDL      : high / low of the PREVIOUS NY session (same window), not the 24h UTC day.
 - Volume spike   : candle volume >= 2x average of the previous 20 candles (current candle excluded).
 - LONG  (A)      : close > max(ORB high, PDH), volume spike, green candle, body >= BODY_MIN (50%) of range,
@@ -80,8 +80,8 @@ def fetch_eligible_futures_pairs():
 
 
 # ----------------------------- CONFIG -----------------------------
-SESSION_START = "13:30"      # UTC (19:00 IST)
-SESSION_END = "21:00"        # UTC, exclusive
+SESSION_START = "13:30"      # legacy/unused - NY session is now 09:30-16:00 America/New_York (see SESSION_CONFIG)
+SESSION_END = "21:00"        # legacy/unused - see SESSION_CONFIG
 CANDLE_MIN = 5
 ORB_CANDLES = 3              # 3 x 5m = 15 min
 VOL_MULT = 2.0
@@ -144,8 +144,9 @@ def fetch_coindcx_candles(pair="B-BTC_USDT", interval="5", limit_days=14):
 
 from zoneinfo import ZoneInfo
 LONDON_TZ = ZoneInfo("Europe/London")
+NY_TZ = ZoneInfo("America/New_York")   # DST-aware: NY cash open 09:30 ET = 14:30 UTC in winter, 13:30 UTC in summer
 SESSION_CONFIG = {
-    "NY": {"tz": timezone.utc, "start": "13:30", "end": "21:00"},
+    "NY": {"tz": NY_TZ, "start": "09:30", "end": "16:00"},
     "LONDON": {"tz": LONDON_TZ, "start": "08:00", "end": "15:30"},
 }
 
