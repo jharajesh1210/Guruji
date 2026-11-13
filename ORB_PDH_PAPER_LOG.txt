@@ -1,7 +1,8 @@
-[I 261113 08:30:00 smartConnect:124] in pool
+[I 261113 08:35:00 smartConnect:124] in pool
 [warn] Nifty 50: Angel One rate limit; pausing 20s then retrying (1/3)
 [warn] Nifty 50: Angel One rate limit; pausing 40s then retrying (2/3)
-[warn] Nifty 50: Angel One rate limit; pausing 60s then retrying (3/3)
-[warn] APOLLOHOSP: Angel One rate limit; pausing 20s then retrying (1/3)
-[DATA UNAVAILABLE] Angel One rate limit reached for APOLLOHOSP; remaining symbols continue in the next cycle.
-PAPER STATUS | capital ₹50000.00 | cash ₹42207.76 | reserved ₹7216.30 | open positions 1 | symbols scanned 2/50 for candle 13:55 | SCAN INCOMPLETE, continues next cycle
+[warn] ADANIPORTS: Angel One rate limit; pausing 20s then retrying (1/3)
+[warn] AXISBANK: Angel One rate limit; pausing 20s then retrying (1/3)
+[warn] AXISBANK: Angel One rate limit; pausing 40s then retrying (2/3)
+[DATA UNAVAILABLE] Angel One rate limit reached for AXISBANK; remaining symbols continue in the next cycle.
+PAPER STATUS | capital ₹50000.00 | cash ₹42207.76 | reserved ₹7216.30 | open positions 1 | symbols scanned 3/50 for candle 14:00 | SCAN INCOMPLETE, continues next cycle
