@@ -88,31 +88,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Launcher: GitHub's own cron rarely fires for the NIFTY50 workflows, so this always-alive
-          # runner starts them on NSE days (Mon-Fri, 03:35-09:55 UTC = 09:05-15:25 IST) when none is active.
-          # max_runs caps how many runs may be created per UTC day (cron + manual + launcher all count).
-          ensure_workflow() {
-            local wf="$1" max_runs="$2" dow hm today active runs
-            dow=$(date -u +%u)
-            hm=$((10#$(date -u +%H%M)))
-            if [ "$dow" -gt 5 ] || [ "$hm" -lt 335 ] || [ "$hm" -gt 955 ]; then
-              return 0
-            fi
-            active=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$wf" --limit 20 --json status \
-              --jq '[.[] | select(.status=="in_progress" or .status=="queued" or .status=="waiting" or .status=="pending")] | length') || return 0
-            if [ "$active" != "0" ]; then
-              return 0
-            fi
-            today=$(date -u +%Y-%m-%d)
-            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$wf" --limit 40 --json createdAt \
-              --jq "[.[] | select(.createdAt >= \"${today}T03:00:00Z\")] | length") || return 0
-            if [ "$runs" -ge "$max_runs" ]; then
-              return 0
-            fi
-            echo "Launcher: starting ${wf} (runs today so far: ${runs})"
-            gh workflow run "$wf" --repo "$GITHUB_REPOSITORY" --ref main || echo "WARN: could not dispatch ${wf}"
-          }
-
           persist() {
             git add orb_pdh_live_state.json orb_pdh_live_trades.csv eligible_futures_universe.csv 2>/dev/null || true
             if git diff --cached --quiet; then
@@ -140,8 +115,6 @@ jobs:
               echo "WARN: cycle ${cycle} failed or timed out; continuing."
             fi
             persist
-            ensure_workflow ORB_PDH_NIFTY50_PAPER.yml 14
-            ensure_workflow NIFTY50_ANGELONE_PAPER.yml 3
             NEXT=$(( (START / 300 + 1) * 300 ))
             NOW=$(date +%s)
             if [ "$NEXT" -gt "$NOW" ]; then
