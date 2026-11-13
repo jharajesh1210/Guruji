@@ -1,2 +1,3 @@
-[I 261113 03:45:01 smartConnect:124] in pool
+[I 261113 03:50:01 smartConnect:124] in pool
+[warn] Nifty 50: Angel One rate limit; pausing 20s then retrying (1/3)
 Nifty index candles unavailable or session not ready.
