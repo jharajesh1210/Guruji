@@ -19,7 +19,10 @@
   "trade_count": 0,
   "trade_date": "2026-11-13",
   "traded_symbols": [],
-  "updated_at": "2026-11-13T10:00:00.952769+05:30",
-  "scan_candle": "2026-11-13T09:55:00+05:30",
-  "scan_done": []
+  "updated_at": "2026-11-13T10:05:00.768716+05:30",
+  "scan_candle": "2026-11-13T10:00:00+05:30",
+  "scan_done": [
+    "ADANIENT",
+    "APOLLOHOSP"
+  ]
 }
