@@ -1,19 +1,7 @@
 {
   "starting_capital": 50000.0,
-  "cash": -33.4099778589798,
+  "cash": 42207.756882231195,
   "positions": {
-    "ADANIPORTS": {
-      "symbol": "ADANIPORTS",
-      "side": "LONG",
-      "entry": 1929.9,
-      "sl": 1907.3458500000002,
-      "target": 2020.1165999999998,
-      "risk": 22.554149999999936,
-      "lock_stage": 0,
-      "qty": 22.168869143816167,
-      "notional": 42783.700560650825,
-      "entry_time": "2026-11-12T09:45:00+05:30"
-    },
     "ASIANPAINT": {
       "symbol": "ASIANPAINT",
       "side": "SHORT",
@@ -33,7 +21,7 @@
   "traded_symbols": [
     "ASIANPAINT"
   ],
-  "updated_at": "2026-11-13T12:35:00.571252+05:30",
-  "scan_candle": "2026-11-13T12:30:00+05:30",
+  "updated_at": "2026-11-13T12:40:00.360764+05:30",
+  "scan_candle": "2026-11-13T12:35:00+05:30",
   "scan_done": []
 }
