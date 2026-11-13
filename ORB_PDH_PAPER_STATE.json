@@ -21,12 +21,7 @@
   "traded_symbols": [
     "ASIANPAINT"
   ],
-  "updated_at": "2026-11-13T14:10:01.159825+05:30",
-  "scan_candle": "2026-11-13T14:05:00+05:30",
-  "scan_done": [
-    "ADANIENT",
-    "ADANIPORTS",
-    "APOLLOHOSP",
-    "AXISBANK"
-  ]
+  "updated_at": "2026-11-13T14:25:01.108168+05:30",
+  "scan_candle": "2026-11-13T14:20:00+05:30",
+  "scan_done": []
 }
