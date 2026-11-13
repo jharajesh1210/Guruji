@@ -1,1 +1,2 @@
-Outside NSE market hours (09:15-15:30 IST); no API calls. Current time: 09:10:00
+[I 261113 03:45:01 smartConnect:124] in pool
+Nifty index candles unavailable or session not ready.
