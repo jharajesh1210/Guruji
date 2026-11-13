@@ -1,6 +1,6 @@
 {
   "starting_capital": 50000.0,
-  "cash": 7182.889461490196,
+  "cash": -33.4099778589798,
   "positions": {
     "ADANIPORTS": {
       "symbol": "ADANIPORTS",
@@ -13,15 +13,31 @@
       "qty": 22.168869143816167,
       "notional": 42783.700560650825,
       "entry_time": "2026-11-12T09:45:00+05:30"
+    },
+    "ASIANPAINT": {
+      "symbol": "ASIANPAINT",
+      "side": "SHORT",
+      "entry": 2501.1,
+      "sl": 2525.16195,
+      "target": 2404.852199999999,
+      "risk": 24.06195000000025,
+      "lock_stage": 0,
+      "qty": 2.8852502656227963,
+      "notional": 7216.299439349175,
+      "entry_time": "2026-11-13T12:15:00+05:30"
     }
   },
   "last_processed_candle": "2026-11-12T15:05:00+05:30",
   "trade_count": 0,
   "trade_date": "2026-11-13",
-  "traded_symbols": [],
-  "updated_at": "2026-11-13T12:15:00.942135+05:30",
-  "scan_candle": "2026-11-13T12:10:00+05:30",
+  "traded_symbols": [
+    "ASIANPAINT"
+  ],
+  "updated_at": "2026-11-13T12:20:00.902680+05:30",
+  "scan_candle": "2026-11-13T12:15:00+05:30",
   "scan_done": [
-    "ADANIENT"
+    "ADANIENT",
+    "APOLLOHOSP",
+    "ASIANPAINT"
   ]
 }
