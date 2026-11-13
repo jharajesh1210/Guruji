@@ -33,11 +33,7 @@
   "traded_symbols": [
     "ASIANPAINT"
   ],
-  "updated_at": "2026-11-13T12:20:00.902680+05:30",
-  "scan_candle": "2026-11-13T12:15:00+05:30",
-  "scan_done": [
-    "ADANIENT",
-    "APOLLOHOSP",
-    "ASIANPAINT"
-  ]
+  "updated_at": "2026-11-13T12:25:00.548430+05:30",
+  "scan_candle": "2026-11-13T12:20:00+05:30",
+  "scan_done": []
 }
