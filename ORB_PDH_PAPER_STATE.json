@@ -19,9 +19,7 @@
   "trade_count": 0,
   "trade_date": "2026-11-13",
   "traded_symbols": [],
-  "updated_at": "2026-11-13T10:15:00.962290+05:30",
-  "scan_candle": "2026-11-13T10:10:00+05:30",
-  "scan_done": [
-    "ADANIENT"
-  ]
+  "updated_at": "2026-11-13T10:20:01.106745+05:30",
+  "scan_candle": "2026-11-13T10:15:00+05:30",
+  "scan_done": []
 }
