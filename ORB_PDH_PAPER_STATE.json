@@ -1,35 +1,14 @@
 {
   "starting_capital": 50000.0,
-  "cash": 42207.756882231195,
-  "positions": {
-    "ASIANPAINT": {
-      "symbol": "ASIANPAINT",
-      "side": "SHORT",
-      "entry": 2501.1,
-      "sl": 2525.16195,
-      "target": 2404.852199999999,
-      "risk": 24.06195000000025,
-      "lock_stage": 0,
-      "qty": 2.8852502656227963,
-      "notional": 7216.299439349175,
-      "entry_time": "2026-11-13T12:15:00+05:30"
-    }
-  },
-  "last_processed_candle": "2026-11-13T12:30:00+05:30",
+  "cash": 49347.38056213831,
+  "positions": {},
+  "last_processed_candle": "2026-11-13T14:35:00+05:30",
   "trade_count": 0,
   "trade_date": "2026-11-13",
   "traded_symbols": [
     "ASIANPAINT"
   ],
-  "updated_at": "2026-11-13T14:38:02.101272+05:30",
-  "scan_candle": "2026-11-13T14:30:00+05:30",
-  "scan_done": [
-    "ADANIENT",
-    "ADANIPORTS",
-    "APOLLOHOSP",
-    "AXISBANK",
-    "BAJAJ-AUTO",
-    "BAJAJFINSV",
-    "BAJFINANCE"
-  ]
+  "updated_at": "2026-11-13T14:40:30.873884+05:30",
+  "scan_candle": "2026-11-13T14:35:00+05:30",
+  "scan_done": []
 }
