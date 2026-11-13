@@ -21,13 +21,15 @@
   "traded_symbols": [
     "ASIANPAINT"
   ],
-  "updated_at": "2026-11-13T14:35:01.069420+05:30",
+  "updated_at": "2026-11-13T14:38:02.101272+05:30",
   "scan_candle": "2026-11-13T14:30:00+05:30",
   "scan_done": [
     "ADANIENT",
     "ADANIPORTS",
     "APOLLOHOSP",
     "AXISBANK",
-    "BAJAJ-AUTO"
+    "BAJAJ-AUTO",
+    "BAJAJFINSV",
+    "BAJFINANCE"
   ]
 }
