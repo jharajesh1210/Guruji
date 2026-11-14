@@ -85,7 +85,23 @@
     "B-DASH_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL",
     "B-H_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL",
     "B-HUMA_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL",
-    "B-GRASS_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL"
+    "B-GRASS_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL",
+    "B-NEAR_USDT|2026-11-14 18:15:00|Valid_Bullish_Breakout_BUY",
+    "B-SUI_USDT|2026-11-14 18:15:00|Stop_Loss_Hit",
+    "B-ADA_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
+    "B-TAO_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
+    "B-AAVE_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
+    "B-LTC_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
+    "B-ONDO_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
+    "B-DOT_USDT|2026-11-14 18:15:00|Next_Session_PDL_Break_Exit_1:1.56",
+    "B-PENGU_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
+    "B-ICP_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
+    "B-PONS_USDT|2026-11-14 18:15:00|Profit_Locked_at_1:2",
+    "B-OP_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
+    "B-WLFI_USDT|2026-11-14 18:15:00|Valid_Bullish_Breakout_BUY",
+    "B-1000BONK_USDT|2026-11-14 18:15:00|Next_Session_PDL_Break_Exit_1:0.3",
+    "B-RENDER_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
+    "B-PLAY_USDT|2026-11-14 18:15:00|Next_Session_PDL_Break_Exit_1:0.25"
   ],
   "open": [
     "B-BTC_USDT",
@@ -97,7 +113,6 @@
     "B-PAXG_USDT",
     "B-SOL_USDT",
     "B-SOPH_USDT",
-    "B-SUI_USDT",
     "B-XAU_USDT",
     "B-XLM_USDT"
   ]
