@@ -1,0 +1,107 @@
+# rd_trading.py auto-run (separate from PART-07 and all other PART files).
+# GitHub schedule is only a backup starter; the runner stays alive ~5.5 hours,
+# scanning every 5 minutes, then dispatches the next run.
+name: rd_trading.py Crypto Scanner
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 */3 * * *"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: rd-trading-scanner
+  cancel-in-progress: false
+
+jobs:
+  rd-trading:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      TG_TOKEN: ${{ secrets.TG_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MIN_24H_VOLUME_USDT: "10000000"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests numpy pandas
+
+      - name: Compile rd_trading.py
+        run: python -m py_compile rd_trading.py
+
+      - name: Run rd_trading.py scanner loop (every 5 minutes)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          persist() {
+            for f in rd_trading_state.json rd_trading_signals.csv; do
+              if [ -f "$f" ]; then git add "$f"; fi
+            done
+            if git diff --cached --quiet; then
+              return 0
+            fi
+            git commit -m "Update rd_trading scanner state" || return 0
+            for attempt in 1 2 3; do
+              git pull --rebase --autostash origin main >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then
+                return 0
+              fi
+              sleep $((attempt * 3))
+            done
+            echo "WARN: could not push rd_trading state this cycle; will retry."
+            return 0
+          }
+
+          END=$(( $(date +%s) + 19800 ))
+          cycle=0
+          while [ "$(date +%s)" -lt "$END" ]; do
+            START=$(date +%s)
+            cycle=$((cycle + 1))
+            echo "=== rd_trading cycle ${cycle} @ $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+            if ! timeout 600 python -u rd_trading.py --alert; then
+              echo "WARN: rd_trading cycle ${cycle} failed or timed out; continuing."
+            fi
+            persist
+            NEXT=$(( (START / 300 + 1) * 300 ))
+            NOW=$(date +%s)
+            if [ "$NEXT" -gt "$NOW" ]; then
+              sleep $((NEXT - NOW))
+            fi
+          done
+          echo "rd_trading loop finished after ${cycle} cycles."
+
+      - name: Upload rd_trading reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rd-trading-reports-${{ github.run_number }}
+          path: |
+            rd_trading_signals.csv
+            rd_trading_state.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Re-dispatch next rd_trading run
+        if: success() || failure()
+        run: |
+          echo "Dispatching next rd_trading runner."
+          gh workflow run rd_trading.yml --repo "${{ github.repository }}" --ref main

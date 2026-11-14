@@ -314,7 +314,123 @@ def scan_market(news_events=None, news_buffer_minutes=30):
         _time.sleep(0.2)
     return pd.DataFrame(rows)
 
+
+# ======================= TELEGRAM ALERTS + AUTO RUN =======================
+SCRIPT_NAME = os.path.basename(__file__)  # "rd_trading.py" - shown in every Telegram message
+ROOT = os.path.dirname(os.path.abspath(__file__))
+STATE_FILE = os.path.join(ROOT, "rd_trading_state.json")
+SIGNALS_FILE = os.path.join(ROOT, "rd_trading_signals.csv")
+
+# Statuses that are worth an alert (entries, lock updates, exits)
+ENTRY_STATUSES = {"Valid_Bullish_Breakout_BUY", "Valid_Bearish_Breakout_SELL"}
+EXIT_PREFIXES = ("Stop_Loss_Hit", "SL_Hit_Exit_Locked", "Target_1:5", "Next_Session_PDH", "Next_Session_PDL")
+LOCK_PREFIXES = ("Profit_Locked_at",)
+
+
+def telegram(message):
+    token = os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN")
+    chat = os.getenv("TG_CHAT_ID") or os.getenv("CHAT_ID")
+    if not token or not chat:
+        print("Telegram not configured; add TG_TOKEN and TG_CHAT_ID secrets.")
+        return False
+    try:
+        r = HTTP.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                      data={"chat_id": chat, "text": message}, timeout=20)
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"Telegram send failed: {e}")
+        return False
+
+
+def _load_state():
+    try:
+        import json
+        with open(STATE_FILE, encoding="utf-8") as f:
+            st = json.load(f)
+            st.setdefault("sent", [])
+            return st
+    except Exception:
+        return {"sent": []}
+
+
+def _save_state(st):
+    import json
+    st["sent"] = st["sent"][-3000:]
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(st, f, indent=2)
+
+
+def _event_kind(status):
+    if status in ENTRY_STATUSES:
+        return "ENTRY"
+    if status.startswith(EXIT_PREFIXES):
+        return "EXIT"
+    if status.startswith(LOCK_PREFIXES):
+        return "LOCK"
+    return None
+
+
+def _format_alert(kind, pair, row, vol24):
+    status = row["Status"]
+    icons = {"ENTRY": "🟢" if "BUY" in status else "🔴", "LOCK": "🔒", "EXIT": "🏁"}
+    lines = [
+        f"{icons[kind]} [{SCRIPT_NAME}] {kind}",
+        f"Coin: {pair}",
+        f"Session: {row['Session']} | Time (IST): {row['Timestamp']}",
+        f"Signal: {status}",
+        f"Price: {row['Close']} | ORH: {row['ORH']} | ORL: {row['ORL']}",
+        f"24h Vol: {vol24:,.0f} USDT",
+    ]
+    if kind == "ENTRY":
+        sl = row["ORL"] if "BUY" in status else row["ORH"]
+        lines.append(f"Entry: {row['Close']} | SL: {sl}")
+    elif kind in ("LOCK", "EXIT"):
+        lines.append(f"PnL (100 USDT @ 30X): {row['Locked_PnL_USDT']} USDT")
+    lines.append("PAPER ONLY - no real orders")
+    return "\n".join(lines)
+
+
+def scan_and_alert(news_events=None, news_buffer_minutes=30):
+    """One auto-run cycle: volume filter -> scan -> Telegram for NEW events only."""
+    st = _load_state()
+    sent = set(st["sent"])
+    pairs = fetch_liquid_pairs()
+    print(f"[{SCRIPT_NAME}] Volume filter > {MIN_24H_VOLUME_USDT:,.0f} USDT: {len(pairs)} coins pass")
+    new_rows = []
+    for p in pairs:
+        try:
+            df = fetch_candles_15m(p["pair"])
+            if len(df) < 20:
+                continue
+            res = run_rd_trading_system(df, news_events, news_buffer_minutes)
+            # last 2 closed candles so a missed cycle does not lose a signal
+            for _, row in res.tail(2).iterrows():
+                kind = _event_kind(str(row["Status"]))
+                if not kind:
+                    continue
+                key = f"{p['pair']}|{row['Timestamp']}|{row['Status']}"
+                if key in sent:
+                    continue
+                if telegram(_format_alert(kind, p["pair"], row, p["volume_24h_usdt"])) or not (
+                        (os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN"))):
+                    sent.add(key)
+                    st["sent"].append(key)
+                new_rows.append({"Script": SCRIPT_NAME, "Pair": p["pair"], "Kind": kind,
+                                 **row.to_dict(), "Volume_24h_USDT": round(p["volume_24h_usdt"])})
+        except Exception as e:
+            print(f"skip {p['pair']}: {e}")
+        _time.sleep(0.2)
+    if new_rows:
+        pd.DataFrame(new_rows).to_csv(SIGNALS_FILE, mode="a", header=not os.path.exists(SIGNALS_FILE), index=False)
+    _save_state(st)
+    print(f"[{SCRIPT_NAME}] cycle done: {len(new_rows)} new event(s)")
+
+
 if __name__ == "__main__":
+    if "--alert" in sys.argv:
+        scan_and_alert()
+        sys.exit(0)
     if "--scan" in sys.argv:
         out = scan_market()
         print(out.to_string(index=False) if not out.empty else "No data")
