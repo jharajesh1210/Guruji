@@ -1,57 +1,98 @@
+# PART-07 follows the PART-05 self-sustaining workflow pattern.
+# GitHub schedule is only a backup starter; the runner stays alive for 5.5 hours,
+# scanning every 5 minutes, then dispatches the next run.
 name: PART-07 Crypto Paper Scanner
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
+  schedule:
+    - cron: "30 */3 * * *"
+
+permissions:
+  contents: write
+  actions: write
 
 concurrency:
   group: part-07-paper-scanner
   cancel-in-progress: false
 
-permissions:
-  contents: read
-
 jobs:
   part-07:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 355
+    env:
+      TG_TOKEN: ${{ secrets.TG_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PAPER_MARGIN_USDT: "50"
+      PAPER_LEVERAGE: "30"
+      MIN_24H_VOLUME_USDT: "10000000"
+      TOP_N: "100"
+      MIN_SCORE: "6"
+      MAX_OPEN_TRADES: "3"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Restore PART-07 paper state
-        uses: actions/cache@v4
-        with:
-          path: |
-            PART-07_state.json
-            PART-07_trades.csv
-            PART-07_signals.csv
-          key: ${{ runner.os }}-part-07-state-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-part-07-state-
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests numpy pandas
+          python -m pip install requests numpy pandas
 
-      - name: Run PART-07 (paper only)
-        env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PAPER_MARGIN_USDT: "50"
-          PAPER_LEVERAGE: "30"
-          MIN_24H_VOLUME_USDT: "10000000"
-          TOP_N: "100"
-          MIN_SCORE: "6"
-          MAX_OPEN_TRADES: "3"
-        run: python -u PART-07.py
+      - name: Compile PART-07
+        run: python -m py_compile PART-07.py
+
+      - name: Run PART-07 scanner loop (every 5 minutes)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          persist() {
+            for f in PART-07_state.json PART-07_trades.csv PART-07_signals.csv PART-07_universe.csv; do
+              if [ -f "$f" ]; then git add "$f"; fi
+            done
+            if git diff --cached --quiet; then
+              return 0
+            fi
+            git commit -m "Update PART-07 paper state" || return 0
+            for attempt in 1 2 3; do
+              git pull --rebase --autostash origin main >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then
+                return 0
+              fi
+              sleep $((attempt * 3))
+            done
+            echo "WARN: could not push PART-07 state this cycle; will retry."
+            return 0
+          }
+
+          END=$(( $(date +%s) + 19800 ))
+          cycle=0
+          while [ "$(date +%s)" -lt "$END" ]; do
+            START=$(date +%s)
+            cycle=$((cycle + 1))
+            echo "=== PART-07 cycle ${cycle} @ $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+            if ! timeout 600 python -u PART-07.py; then
+              echo "WARN: PART-07 cycle ${cycle} failed or timed out; continuing."
+            fi
+            persist
+            NEXT=$(( (START / 300 + 1) * 300 ))
+            NOW=$(date +%s)
+            if [ "$NEXT" -gt "$NOW" ]; then
+              sleep $((NEXT - NOW))
+            fi
+          done
+          echo "PART-07 loop finished after ${cycle} cycles."
 
       - name: Upload PART-07 reports
         if: always()
@@ -65,3 +106,9 @@ jobs:
             PART-07_state.json
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Re-dispatch next PART-07 run (PART-05 style)
+        if: success() || failure()
+        run: |
+          echo "Dispatching next PART-07 runner."
+          gh workflow run PART-07.yml --repo "${{ github.repository }}" --ref main
