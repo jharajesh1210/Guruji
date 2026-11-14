@@ -70,7 +70,8 @@
     "B-TRUMP_USDT|2026-11-14 16:45:00|Valid_Bearish_Breakout_SELL",
     "B-UNI_USDT|2026-11-14 17:00:00|Stop_Loss_Hit",
     "B-ONDO_USDT|2026-11-14 17:00:00|Next_Session_PDL_Break_Exit_1:0.25",
-    "B-AIN_USDT|2026-11-14 17:00:00|Stop_Loss_Hit"
+    "B-AIN_USDT|2026-11-14 17:00:00|Stop_Loss_Hit",
+    "B-QNT_USDT|2026-11-14 17:15:00|Valid_Bullish_Breakout_BUY"
   ],
   "open": [
     "B-BNB_USDT",
