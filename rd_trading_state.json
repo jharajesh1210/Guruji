@@ -201,7 +201,9 @@
     "B-SAND_USDT|2026-11-14 19:30:00|Valid_Bearish_Breakout_SELL",
     "B-PYTH_USDT|2026-11-14 19:30:00|Valid_Bearish_Breakout_SELL",
     "B-WIF_USDT|2026-11-14 19:30:00|Valid_Bearish_Breakout_SELL",
-    "B-SEI_USDT|2026-11-14 19:30:00|Valid_Bearish_Breakout_SELL"
+    "B-SEI_USDT|2026-11-14 19:30:00|Valid_Bearish_Breakout_SELL",
+    "B-BTC_USDT|2026-11-14 19:30:00|Valid_Bearish_Breakout_SELL",
+    "B-ETH_USDT|2026-11-14 19:30:00|Valid_Bearish_Breakout_SELL"
   ],
   "open": [
     "B-BNB_USDT",
