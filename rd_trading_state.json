@@ -134,7 +134,8 @@
     "B-HUMA_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.16",
     "B-ATOM_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.29",
     "B-PYTH_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.26",
-    "B-WIF_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.82"
+    "B-WIF_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.82",
+    "B-BZ_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.32"
   ],
   "open": [
     "B-DOGE_USDT",
