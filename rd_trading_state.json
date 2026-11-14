@@ -135,12 +135,22 @@
     "B-ATOM_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.29",
     "B-PYTH_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.26",
     "B-WIF_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.82",
-    "B-BZ_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.32"
+    "B-BZ_USDT|2026-11-14 18:45:00|Next_Session_PDL_Break_Exit_1:0.32",
+    "B-XRP_USDT|2026-11-14 19:15:00|Valid_Bullish_Breakout_BUY",
+    "B-UNI_USDT|2026-11-14 19:15:00|Valid_Bearish_Breakout_SELL",
+    "B-INJ_USDT|2026-11-14 19:15:00|Valid_Bearish_Breakout_SELL",
+    "B-NATGAS_USDT|2026-11-14 19:15:00|Valid_Bullish_Breakout_BUY",
+    "B-KGEN_USDT|2026-11-14 19:15:00|Stop_Loss_Hit",
+    "B-PAXG_USDT|2026-11-14 19:15:00|Valid_Bullish_Breakout_BUY",
+    "B-1000SHIB_USDT|2026-11-14 19:15:00|Valid_Bearish_Breakout_SELL",
+    "B-BLESS_USDT|2026-11-14 19:15:00|Next_Session_PDH_Break_Exit_1:0.85",
+    "B-BEAT_USDT|2026-11-14 19:15:00|Next_Session_PDH_Break_Exit_1:0.04"
   ],
   "open": [
     "B-DOGE_USDT",
     "B-GRAM_USDT",
     "B-SOPH_USDT",
-    "B-XAU_USDT"
+    "B-XAU_USDT",
+    "B-XRP_USDT"
   ]
 }
