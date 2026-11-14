@@ -34,7 +34,19 @@
     "B-BEAT_USDT|2026-11-14 15:45:00|Stop_Loss_Hit",
     "B-BLESS_USDT|2026-11-14 15:30:00|SL_Hit_Exit_Locked_1:3.0",
     "B-BLESS_USDT|2026-11-14 15:45:00|Valid_Bullish_Breakout_BUY",
-    "B-WIF_USDT|2026-11-14 15:45:00|Valid_Bearish_Breakout_SELL"
+    "B-WIF_USDT|2026-11-14 15:45:00|Valid_Bearish_Breakout_SELL",
+    "B-BARD_USDT|2026-11-14 16:00:00|Next_Session_PDL_Break_Exit_1:0.01",
+    "B-SHELL_USDT|2026-11-14 16:00:00|Valid_Bearish_Breakout_SELL",
+    "B-AVAX_USDT|2026-11-14 16:00:00|Next_Session_PDL_Break_Exit_1:1.05",
+    "B-BULLA_USDT|2026-11-14 16:00:00|Stop_Loss_Hit",
+    "B-LIT_USDT|2026-11-14 16:00:00|Valid_Bullish_Breakout_BUY",
+    "B-FET_USDT|2026-11-14 16:00:00|Next_Session_PDL_Break_Exit_1:0.86",
+    "B-PENGU_USDT|2026-11-14 16:00:00|Next_Session_PDL_Break_Exit_1:0.2",
+    "B-STO_USDT|2026-11-14 16:00:00|Valid_Bearish_Breakout_SELL",
+    "B-BEAT_USDT|2026-11-14 16:00:00|Valid_Bullish_Breakout_BUY",
+    "B-PYTH_USDT|2026-11-14 16:00:00|Valid_Bearish_Breakout_SELL",
+    "B-AR_USDT|2026-11-14 16:00:00|Valid_Bearish_Breakout_SELL",
+    "B-PLUME_USDT|2026-11-14 16:00:00|Valid_Bearish_Breakout_SELL"
   ],
   "open": [
     "B-AIN_USDT",
