@@ -1,0 +1,26 @@
+{
+  "sent": [
+    "B-BTC_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-ETH_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-SOL_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-XAU_USDT|2026-11-14 15:30:00|Valid_Bullish_Breakout_BUY",
+    "B-BNB_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-DOGE_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-SUI_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-UNI_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-IDOL_USDT|2026-11-14 15:15:00|Profit_Locked_at_1:2",
+    "B-IDOL_USDT|2026-11-14 15:30:00|SL_Hit_Exit_Locked_1:2.0",
+    "B-SOPH_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-ARIA_USDT|2026-11-14 15:30:00|Valid_Bearish_Breakout_SELL",
+    "B-PAXG_USDT|2026-11-14 15:30:00|Valid_Bullish_Breakout_BUY",
+    "B-TIA_USDT|2026-11-14 15:30:00|Next_Session_PDL_Break_Exit_1:1.0",
+    "B-XLM_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-CAP_USDT|2026-11-14 15:30:00|Valid_Bullish_Breakout_BUY",
+    "B-TRX_USDT|2026-11-14 15:30:00|Next_Session_PDH_Break_Exit_1:1.0",
+    "B-GRAM_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-ETC_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY",
+    "B-WLFI_USDT|2026-11-14 15:15:00|Next_Session_PDH_Break_Exit_1:1.0",
+    "B-AIN_USDT|2026-11-14 15:30:00|Valid_Bearish_Breakout_SELL",
+    "B-SEI_USDT|2026-11-14 15:15:00|Valid_Bullish_Breakout_BUY"
+  ]
+}

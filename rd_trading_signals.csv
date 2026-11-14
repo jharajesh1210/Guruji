@@ -1,0 +1,11 @@
+Script,Pair,Kind,Timestamp,Session,Close,ORH,ORL,Session_PDH,Session_PDL,News_Filter,Status,Locked_PnL_USDT,Volume_24h_USDT
+rd_trading.py,B-BTC_USDT,ENTRY,2026-11-14 15:15:00,London,67381.1,67300.0,67000.1,67300.0,66930.0,False,Valid_Bullish_Breakout_BUY,0.0,13700536785
+rd_trading.py,B-ETH_USDT,ENTRY,2026-11-14 15:15:00,London,1912.62,1906.5,1896.57,1909.44,1893.55,False,Valid_Bullish_Breakout_BUY,0.0,8720142375
+rd_trading.py,B-SOL_USDT,ENTRY,2026-11-14 15:15:00,London,75.9,75.58,75.17,75.79,75.02,False,Valid_Bullish_Breakout_BUY,0.0,1872555676
+rd_trading.py,B-XAU_USDT,ENTRY,2026-11-14 15:30:00,London,3886.0,3885.23,3883.2,3885.99,3883.2,False,Valid_Bullish_Breakout_BUY,0.0,1255157301
+rd_trading.py,B-BNB_USDT,ENTRY,2026-11-14 15:15:00,London,619.52,617.45,614.82,618.05,613.91,False,Valid_Bullish_Breakout_BUY,0.0,387966541
+rd_trading.py,B-IDOL_USDT,LOCK,2026-11-14 15:15:00,London,0.02,0.02,0.02,0.02,0.02,False,Profit_Locked_at_1:2,310.6,143507983
+rd_trading.py,B-IDOL_USDT,EXIT,2026-11-14 15:30:00,London,0.02,0.02,0.02,0.02,0.02,False,SL_Hit_Exit_Locked_1:2.0,621.19,143507983
+rd_trading.py,B-TIA_USDT,EXIT,2026-11-14 15:30:00,London,0.37,0.37,0.37,0.37,0.37,False,Next_Session_PDL_Break_Exit_1:1.0,116.6,54057486
+rd_trading.py,B-TRX_USDT,EXIT,2026-11-14 15:30:00,London,0.31,0.31,0.31,0.31,0.31,False,Next_Session_PDH_Break_Exit_1:1.0,10.36,31457747
+rd_trading.py,B-WLFI_USDT,EXIT,2026-11-14 15:15:00,London,0.05,0.05,0.05,0.05,0.05,False,Next_Session_PDH_Break_Exit_1:1.0,34.04,15428459
