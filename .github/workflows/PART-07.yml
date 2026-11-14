@@ -1,0 +1,68 @@
+name: PART-07 Crypto Paper Scanner
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: part-07-paper-scanner
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  part-07:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Restore PART-07 paper state
+        uses: actions/cache@v4
+        with:
+          path: |
+            PART-07_state.json
+            PART-07_trades.csv
+            PART-07_signals.csv
+          key: ${{ runner.os }}-part-07-state-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-part-07-state-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests numpy pandas
+
+      - name: Run PART-07 (paper only)
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PAPER_MARGIN_USDT: "50"
+          PAPER_LEVERAGE: "30"
+          MIN_24H_VOLUME_USDT: "10000000"
+          TOP_N: "100"
+          MIN_SCORE: "6"
+          MAX_OPEN_TRADES: "3"
+        run: python -u PART-07.py
+
+      - name: Upload PART-07 reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PART-07-paper-reports-${{ github.run_number }}
+          path: |
+            PART-07_trades.csv
+            PART-07_signals.csv
+            PART-07_universe.csv
+            PART-07_state.json
+          if-no-files-found: warn
+          retention-days: 30
