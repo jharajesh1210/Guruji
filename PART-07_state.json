@@ -1,30 +1,11 @@
 {
-  "open": {
-    "B-LINK_USDT": {
-      "side": "SHORT",
-      "session": "NY",
-      "entry": 9.066,
-      "stop": 9.370360999999999,
-      "initial_stop": 9.370360999999999,
-      "target": 7.848556000000007,
-      "risk_dist": 0.3043609999999983,
-      "notional": 29.78699636287189,
-      "qty": 3.28557206738053,
-      "risk_budget": 1.0,
-      "quant_score": 8,
-      "orb_time": "2026-11-14T16:25:00+00:00",
-      "quant_time": "2026-11-14T16:15:00+00:00",
-      "entry_time": "2026-11-14T16:25:00+00:00",
-      "bars": 0,
-      "lock": 0
-    }
-  },
+  "open": {},
   "last_5m": {
     "B-HYPE_USDT": "2026-11-14T14:35:00+00:00",
     "B-TAO_USDT": "2026-11-14T14:50:00+00:00",
     "B-LIT_USDT": "2026-11-14T18:05:00+00:00",
     "B-RENDER_USDT": "2026-11-14T18:05:00+00:00",
-    "B-LINK_USDT": "2026-11-14T18:15:00+00:00"
+    "B-LINK_USDT": "2026-11-14T18:20:00+00:00"
   },
   "last_15m": {
     "B-BTC_USDT": "2026-11-14T18:00:00+00:00",
@@ -167,6 +148,31 @@
       "quant_score": 7,
       "orb_time": "2026-11-14T16:10:00+00:00",
       "quant_time": "2026-11-14T16:00:00+00:00"
+    },
+    {
+      "strategy": "PART-07_CONFLUENCE",
+      "pair": "B-LINK_USDT",
+      "side": "SHORT",
+      "session": "NY",
+      "entry_time": "2026-11-14T16:25:00+00:00",
+      "exit_time": "2026-11-14T18:20:00+00:00",
+      "entry": 9.066,
+      "exit": 9.127,
+      "stop_initial": 9.370360999999999,
+      "stop_final": 9.370360999999999,
+      "target": 7.848556000000007,
+      "quantity": 3.28557206738053,
+      "notional_usdt": 29.78699636287189,
+      "margin_est_usdt": 0.9928998787623963,
+      "leverage": 30.0,
+      "gross_pnl_usdt": -0.20041989611021216,
+      "fees_gst_usdt": 0.03514865570818883,
+      "net_pnl_usdt": -0.23556855181840097,
+      "net_r": -0.23556855181840097,
+      "exit_reason": "TIME_STOP_2H",
+      "quant_score": 8,
+      "orb_time": "2026-11-14T16:25:00+00:00",
+      "quant_time": "2026-11-14T16:15:00+00:00"
     }
   ]
 }
