@@ -60,7 +60,14 @@
     "B-ONE_USDT|2026-11-14 16:30:00|Stop_Loss_Hit",
     "B-ETHFI_USDT|2026-11-14 16:30:00|Valid_Bearish_Breakout_SELL",
     "B-STRK_USDT|2026-11-14 16:30:00|Valid_Bearish_Breakout_SELL",
-    "B-BLESS_USDT|2026-11-14 16:30:00|Valid_Bullish_Breakout_BUY"
+    "B-BLESS_USDT|2026-11-14 16:30:00|Valid_Bullish_Breakout_BUY",
+    "B-HYPE_USDT|2026-11-14 16:45:00|Valid_Bearish_Breakout_SELL",
+    "B-CL_USDT|2026-11-14 16:45:00|Valid_Bearish_Breakout_SELL",
+    "B-BZ_USDT|2026-11-14 16:45:00|Valid_Bearish_Breakout_SELL",
+    "B-ARIA_USDT|2026-11-14 16:45:00|Valid_Bullish_Breakout_BUY",
+    "B-DODOX_USDT|2026-11-14 16:45:00|Next_Session_PDH_Break_Exit_1:1.81",
+    "B-KGEN_USDT|2026-11-14 16:45:00|Valid_Bullish_Breakout_BUY",
+    "B-TRUMP_USDT|2026-11-14 16:45:00|Valid_Bearish_Breakout_SELL"
   ],
   "open": [
     "B-AIN_USDT",
