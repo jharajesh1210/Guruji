@@ -12,6 +12,9 @@ CANDLE_URL = PUB + "/market_data/candlesticks"
 PRICE_URL = PUB + "/market_data/v3/current_prices/futures/rt"
 MIN_24H_VOLUME_USDT = float(os.getenv("MIN_24H_VOLUME_USDT", "10000000"))  # 10 million USDT
 CANDLE_BARS = int(os.getenv("CANDLE_BARS", "300"))  # 15m bars fetched per coin
+MAX_TICKER_AGE_SEC = int(os.getenv("MAX_TICKER_AGE_SEC", "600"))  # ignore stale/delisted tickers
+MAX_NEW_ENTRIES_PER_CYCLE = int(os.getenv("MAX_NEW_ENTRIES_PER_CYCLE", "5"))  # cap simultaneous new entries
+BARS_PER_24H = 96  # 15m candles in 24 hours
 HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "RD-TRADING-SCANNER/1.0"})
 
@@ -141,6 +144,9 @@ def run_rd_trading_system(df, news_events=None, news_buffer_minutes=30):
     # NY runs 18:30 -> 05:30 IST: candles after midnight belong to the previous day's NY session
     after_midnight_ny = (df['Session'] == 'NY') & (df['Timestamp'].dt.time < time(5, 30))
     df['Date'] = (df['Timestamp'] - pd.to_timedelta(after_midnight_ny.astype(int), unit='D')).dt.date
+    # Volume average over the previous 20 candles of the whole series (not just this session),
+    # so the volume check also works in the first candles of a session.
+    df['VolMA20'] = df['Volume'].shift(1).rolling(window=20, min_periods=10).mean()
     
     results = []
     active_trade = None
@@ -194,8 +200,11 @@ def run_rd_trading_system(df, news_events=None, news_buffer_minutes=30):
                             low_break = row['Low'] < orb_low
                             close_low_break = row['Close'] < orb_low
                             
-                            vol_ma = sess_group['Volume'].iloc[:i].rolling(window=10).mean().iloc[-1]
-                            high_vol = row['Volume'] > (vol_ma * 1.5) if not pd.isna(vol_ma) else True
+                            # BUG FIX: earlier, vol_ma was NaN for the first ~10 candles of a session and
+                            # NaN meant "volume OK" -> every breakout passed at session start.
+                            # Now: no volume average available = NOT confirmed.
+                            vol_ma = row['VolMA20']
+                            high_vol = bool(row['Volume'] > (vol_ma * 1.5)) if not pd.isna(vol_ma) else False
                             
                             if high_break:
                                 if close_break and high_vol:
@@ -251,23 +260,29 @@ def fetch_liquid_pairs(min_volume_usdt=MIN_24H_VOLUME_USDT):
     """
     CoinDCX USDT futures pairs whose 24h volume is ABOVE min_volume_usdt (default 10M USDT).
     Only these coins get scanned.
-    The CoinDCX 'v' field is treated as 24h quote (USDT) volume. If it turns out to be in coin
-    units, run with VOLUME_IS_BASE=1 to use ltp * v instead.
+    The CoinDCX 'v' field IS the 24h quote (USDT) volume (verified against 24h candle sums:
+    BTC v=13.71B vs candles 13.70B), so no ltp multiplication. VOLUME_IS_BASE=1 is kept only
+    as an override. Stale tickers (old timestamp) are skipped.
     """
     payload = http_json(PRICE_URL)
     prices = payload.get("prices", {}) if isinstance(payload, dict) else {}
     volume_is_base = os.getenv("VOLUME_IS_BASE", "0") == "1"
     out = []
+    now_ms = _time.time() * 1000
     for pair, q in prices.items():
         if not (pair.startswith("B-") and pair.endswith("_USDT")):
             continue
         try:
             ltp = float(q.get("ls", 0))
             v = float(q.get("v", 0))
+            ts = float(q.get("ctRT") or q.get("btST") or 0)
         except (TypeError, ValueError):
             continue
+        # Stale/delisted tickers keep an old volume number forever (e.g. STORJ, SCRT) - skip them.
+        if ltp <= 0 or ts <= 0 or (now_ms - ts) > MAX_TICKER_AGE_SEC * 1000:
+            continue
         vol_usdt = ltp * v if volume_is_base else v
-        if vol_usdt > min_volume_usdt:
+        if vol_usdt >= min_volume_usdt:  # 24h volume must NOT be below 10M USDT
             out.append({"pair": pair, "ltp": ltp, "volume_24h_usdt": vol_usdt})
     out.sort(key=lambda x: x["volume_24h_usdt"], reverse=True)
     return out
@@ -294,15 +309,27 @@ def fetch_candles_15m(pair, bars=CANDLE_BARS):
     return out.iloc[:-1].reset_index(drop=True)  # drop the still-forming last candle
 
 
+def candle_volume_ok(df):
+    """Second check on the SAME candles that get traded: last 24h (96 x 15m) volume in USDT
+    must also be >= MIN_24H_VOLUME_USDT. Returns (ok, volume_usdt)."""
+    if len(df) < BARS_PER_24H:
+        return False, 0.0
+    last = df.iloc[-BARS_PER_24H:]
+    vol = float((last["Volume"] * last["Close"]).sum())
+    return vol >= MIN_24H_VOLUME_USDT, vol
+
+
 def scan_market(news_events=None, news_buffer_minutes=30):
     pairs = fetch_liquid_pairs()
-    print(f"Volume filter > {MIN_24H_VOLUME_USDT:,.0f} USDT: {len(pairs)} coins pass")
+    print(f"Volume filter >= {MIN_24H_VOLUME_USDT:,.0f} USDT: {len(pairs)} coins pass")
     rows = []
     for p in pairs:
         try:
             df = fetch_candles_15m(p["pair"])
-            if len(df) < 20:
+            ok, cvol = candle_volume_ok(df)
+            if not ok:
                 continue
+            p["volume_24h_usdt"] = min(p["volume_24h_usdt"], cvol)
             res = run_rd_trading_system(df, news_events, news_buffer_minutes)
             if res.empty:
                 continue
@@ -396,13 +423,18 @@ def scan_and_alert(news_events=None, news_buffer_minutes=30):
     st = _load_state()
     sent = set(st["sent"])
     pairs = fetch_liquid_pairs()
-    print(f"[{SCRIPT_NAME}] Volume filter > {MIN_24H_VOLUME_USDT:,.0f} USDT: {len(pairs)} coins pass")
+    print(f"[{SCRIPT_NAME}] Ticker volume filter >= {MIN_24H_VOLUME_USDT:,.0f} USDT: {len(pairs)} coins pass")
     new_rows = []
+    entries_sent = 0
+    candle_rejected = 0
     for p in pairs:
         try:
             df = fetch_candles_15m(p["pair"])
-            if len(df) < 20:
+            ok, cvol = candle_volume_ok(df)
+            if not ok:
+                candle_rejected += 1
                 continue
+            p["volume_24h_usdt"] = min(p["volume_24h_usdt"], cvol)  # show the lower (safer) volume
             res = run_rd_trading_system(df, news_events, news_buffer_minutes)
             # last 2 closed candles so a missed cycle does not lose a signal
             for _, row in res.tail(2).iterrows():
@@ -412,6 +444,14 @@ def scan_and_alert(news_events=None, news_buffer_minutes=30):
                 key = f"{p['pair']}|{row['Timestamp']}|{row['Status']}"
                 if key in sent:
                     continue
+                if kind == "ENTRY":
+                    # coins are processed highest 24h volume first; cap new entries per cycle
+                    if entries_sent >= MAX_NEW_ENTRIES_PER_CYCLE:
+                        sent.add(key)
+                        st["sent"].append(key)
+                        print(f"entry cap reached, skipped {p['pair']}")
+                        continue
+                    entries_sent += 1
                 if telegram(_format_alert(kind, p["pair"], row, p["volume_24h_usdt"])) or not (
                         (os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN"))):
                     sent.add(key)
@@ -424,7 +464,8 @@ def scan_and_alert(news_events=None, news_buffer_minutes=30):
     if new_rows:
         pd.DataFrame(new_rows).to_csv(SIGNALS_FILE, mode="a", header=not os.path.exists(SIGNALS_FILE), index=False)
     _save_state(st)
-    print(f"[{SCRIPT_NAME}] cycle done: {len(new_rows)} new event(s)")
+    print(f"[{SCRIPT_NAME}] cycle done: {len(new_rows)} new event(s), "
+          f"{candle_rejected} coin(s) rejected by 24h candle-volume check")
 
 
 if __name__ == "__main__":
