@@ -15,8 +15,9 @@ Same entry / exit logic as the original script (PART-01), with these updates:
      MAX_ENTRIES_PER_SESSION_DAY new entries per session per day (pairs are scanned from the most
      liquid downwards, so liquid pairs get priority).
   5) New ASIA session (Asia/Tokyo 09:00 - 15:30, same rules as the other sessions).
-
-London keeps the original behaviour (no risk filter / no limits), only the sizing method changed.
+  6) Loss reduction (after the first paper results): London now also gets the risk filter and limits, plus a
+     cluster guard (max MAX_SAME_DIR_PER_BAR same-direction entries per session per 5m bar) and a
+     session-day loss breaker (no new entries once realized PnL <= -SESSION_DAY_LOSS_LIMIT_USDT).
 
 Rules (unchanged):
 - Session        : each session has its own ORB and its own previous-session PDH.
@@ -121,6 +122,13 @@ MAX_RISK_PCT = 2.0                 # ...and <= 2.0% of entry (wide stops make 2R
 # --- PART-04 update 4: correlation limits (only for sessions with limits=True) ---
 MAX_OPEN_PER_SESSION = 4           # max simultaneously open paper trades per session
 MAX_ENTRIES_PER_SESSION_DAY = 8    # max new entries per session per day
+
+# --- PART-04 update 6 (loss reduction): market-wide cluster guard + session-day loss breaker ---
+# On 13 Nov, 20 LONG entries fired on the SAME 5m bar (13:30 UTC = 08:30 ET news candle) across unrelated coins,
+# then reversed together: that is one bet taken 20 times. Pairs are scanned most-liquid first, so the first
+# MAX_SAME_DIR_PER_BAR signals on a bar get the trade and the rest are skipped.
+MAX_SAME_DIR_PER_BAR = 2           # max new entries per session, per direction, on the same 5m bar
+SESSION_DAY_LOSS_LIMIT_USDT = 45.0 # stop NEW entries in a session for the day once realized net PnL <= -this (3 x risk)
 # -------------------------------------------------------------------
 
 LONDON_TZ = ZoneInfo("Europe/London")
@@ -129,7 +137,7 @@ TOKYO_TZ = ZoneInfo("Asia/Tokyo")
 # Session times are LOCAL times of each session's timezone, so DST is handled automatically.
 SESSION_CONFIG = {
     "NY": {"tz": NY_TZ, "start": "09:30", "end": "16:00", "limits": True},
-    "LONDON": {"tz": LONDON_TZ, "start": "08:00", "end": "15:30", "limits": False},
+    "LONDON": {"tz": LONDON_TZ, "start": "08:00", "end": "15:30", "limits": True},   # was False: London made ~all of the losses
     "ASIA": {"tz": TOKYO_TZ, "start": "09:00", "end": "15:30", "limits": True},
 }
 
@@ -214,6 +222,10 @@ def record_trade(state, trade, pair, session, notional):
         "pnl_usdt_net": trade["r_net"] * usdt_per_r,
     })
     state["trades"].append(trade)
+    # Realized net PnL per session-day (feeds SESSION_DAY_LOSS_LIMIT_USDT)
+    local_day = pd.Timestamp(trade["entry_time"]).tz_convert(SESSION_CONFIG[session]["tz"]).date()
+    day_key = f"{session}:{local_day}"
+    state["day_pnl"][day_key] = state["day_pnl"].get(day_key, 0.0) + float(trade["pnl_usdt_net"])
     return trade
 
 
@@ -240,13 +252,15 @@ def send_telegram(message):
 
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"positions": {}, "last_bar": {}, "trades": [], "entries": {}}
+        return {"positions": {}, "last_bar": {}, "trades": [], "entries": {}, "bar_entries": {}, "day_pnl": {}}
     with open(STATE_FILE, "r", encoding="utf-8") as f:
         state = json.load(f)
     state.setdefault("positions", {})
     state.setdefault("last_bar", {})
     state.setdefault("trades", [])
     state.setdefault("entries", {})
+    state.setdefault("bar_entries", {})
+    state.setdefault("day_pnl", {})
     return state
 
 
@@ -344,9 +358,14 @@ def live_process_pair(pair, state, session, data=None):
                     day_key = f"{session}:{today}"
                     opened_today = state["entries"].get(day_key, 0)
                     open_now = sum(1 for p in state["positions"].values() if p.get("session") == session)
+                    bar_key = f"{session}:{stamp}:{side}"
+                    same_bar_dir = state["bar_entries"].get(bar_key, 0)
+                    day_loss = state["day_pnl"].get(day_key, 0.0)
                     if (not (MIN_RISK_PCT <= risk_pct <= MAX_RISK_PCT)
                             or open_now >= MAX_OPEN_PER_SESSION
-                            or opened_today >= MAX_ENTRIES_PER_SESSION_DAY):
+                            or opened_today >= MAX_ENTRIES_PER_SESSION_DAY
+                            or same_bar_dir >= MAX_SAME_DIR_PER_BAR
+                            or day_loss <= -SESSION_DAY_LOSS_LIMIT_USDT):
                         side = None
                 if side:
                     notional = position_notional(c, risk)
@@ -358,6 +377,8 @@ def live_process_pair(pair, state, session, data=None):
                     state["positions"][key] = pos
                     day_key = f"{session}:{today}"
                     state["entries"][day_key] = state["entries"].get(day_key, 0) + 1
+                    bar_key = f"{session}:{stamp}:{side}"
+                    state["bar_entries"][bar_key] = state["bar_entries"].get(bar_key, 0) + 1
                     qty = notional / c
                     send_telegram(f"COINDCX {session} ORB {side} PAPER\n{pair}\nEntry: {c}\nSL: {sl}\nTP: {pos['tp']}\nRisk: {RISK_PER_TRADE_USDT} USDT ({risk / c * 100:.2f}% stop) | Notional: {notional:.2f} USDT | Leverage cap: {LEVERAGE}x\nQty: {qty:.8f}")
             state["last_bar"][key] = stamp
