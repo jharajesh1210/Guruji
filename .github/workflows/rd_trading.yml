@@ -53,7 +53,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           persist() {
-            for f in rd_trading_state.json rd_trading_signals.csv; do
+            for f in rd_trading_state.json rd_trading_signals_v2.csv; do
               if [ -f "$f" ]; then git add "$f"; fi
             done
             if git diff --cached --quiet; then
@@ -95,7 +95,7 @@ jobs:
         with:
           name: rd-trading-reports-${{ github.run_number }}
           path: |
-            rd_trading_signals.csv
+            rd_trading_signals_v2.csv
             rd_trading_state.json
           if-no-files-found: warn
           retention-days: 30
