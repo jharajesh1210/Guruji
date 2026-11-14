@@ -9,3 +9,4 @@ rd_trading.py,B-IDOL_USDT,EXIT,2026-11-14 15:30:00,London,0.02,0.02,0.02,0.02,0.
 rd_trading.py,B-TIA_USDT,EXIT,2026-11-14 15:30:00,London,0.37,0.37,0.37,0.37,0.37,False,Next_Session_PDL_Break_Exit_1:1.0,116.6,54057486
 rd_trading.py,B-TRX_USDT,EXIT,2026-11-14 15:30:00,London,0.31,0.31,0.31,0.31,0.31,False,Next_Session_PDH_Break_Exit_1:1.0,10.36,31457747
 rd_trading.py,B-WLFI_USDT,EXIT,2026-11-14 15:15:00,London,0.05,0.05,0.05,0.05,0.05,False,Next_Session_PDH_Break_Exit_1:1.0,34.04,15428459
+rd_trading.py,B-SEI_USDT,EXIT,2026-11-14 16:15:00,London,0.04073,0.0411,0.04073,0.04125,0.04073,False,Stop_Loss_Hit,-30.62,10898249

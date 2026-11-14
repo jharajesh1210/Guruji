@@ -46,7 +46,13 @@
     "B-BEAT_USDT|2026-11-14 16:00:00|Valid_Bullish_Breakout_BUY",
     "B-PYTH_USDT|2026-11-14 16:00:00|Valid_Bearish_Breakout_SELL",
     "B-AR_USDT|2026-11-14 16:00:00|Valid_Bearish_Breakout_SELL",
-    "B-PLUME_USDT|2026-11-14 16:00:00|Valid_Bearish_Breakout_SELL"
+    "B-PLUME_USDT|2026-11-14 16:00:00|Valid_Bearish_Breakout_SELL",
+    "B-ENA_USDT|2026-11-14 16:15:00|Valid_Bearish_Breakout_SELL",
+    "B-BULLA_USDT|2026-11-14 16:15:00|Valid_Bullish_Breakout_BUY",
+    "B-FET_USDT|2026-11-14 16:15:00|Valid_Bearish_Breakout_SELL",
+    "B-ERA_USDT|2026-11-14 16:15:00|Valid_Bullish_Breakout_BUY",
+    "B-BLESS_USDT|2026-11-14 16:15:00|Stop_Loss_Hit",
+    "B-SEI_USDT|2026-11-14 16:15:00|Stop_Loss_Hit"
   ],
   "open": [
     "B-AIN_USDT",
@@ -59,7 +65,6 @@
     "B-ETH_USDT",
     "B-GRAM_USDT",
     "B-PAXG_USDT",
-    "B-SEI_USDT",
     "B-SOL_USDT",
     "B-SOPH_USDT",
     "B-SUI_USDT",
