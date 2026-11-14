@@ -1,27 +1,8 @@
 {
-  "open": {
-    "B-TAO_USDT": {
-      "side": "SHORT",
-      "session": "LONDON",
-      "entry": 205.32,
-      "stop": 205.32,
-      "initial_stop": 209.05884999999998,
-      "target": 190.36460000000005,
-      "risk_dist": 3.738849999999985,
-      "notional": 54.91528143680565,
-      "qty": 0.2674619201091255,
-      "risk_budget": 1.0,
-      "quant_score": 9,
-      "orb_time": "2026-11-14T12:55:00+00:00",
-      "quant_time": "2026-11-14T12:45:00+00:00",
-      "entry_time": "2026-11-14T12:55:00+00:00",
-      "bars": 0,
-      "lock": 0
-    }
-  },
+  "open": {},
   "last_5m": {
     "B-HYPE_USDT": "2026-11-14T14:35:00+00:00",
-    "B-TAO_USDT": "2026-11-14T14:45:00+00:00"
+    "B-TAO_USDT": "2026-11-14T14:50:00+00:00"
   },
   "last_15m": {
     "B-BTC_USDT": "2026-11-14T14:30:00+00:00",
@@ -86,6 +67,31 @@
       "quant_score": 7,
       "orb_time": "2026-11-14T12:40:00+00:00",
       "quant_time": "2026-11-14T12:30:00+00:00"
+    },
+    {
+      "strategy": "PART-07_CONFLUENCE",
+      "pair": "B-TAO_USDT",
+      "side": "SHORT",
+      "session": "LONDON",
+      "entry_time": "2026-11-14T12:55:00+00:00",
+      "exit_time": "2026-11-14T14:50:00+00:00",
+      "entry": 205.32,
+      "exit": 198.91,
+      "stop_initial": 209.05884999999998,
+      "stop_final": 205.32,
+      "target": 190.36460000000005,
+      "quantity": 0.2674619201091255,
+      "notional_usdt": 54.91528143680565,
+      "margin_est_usdt": 1.830509381226855,
+      "leverage": 30.0,
+      "gross_pnl_usdt": 1.7144309078994935,
+      "fees_gst_usdt": 0.06480003209543067,
+      "net_pnl_usdt": 1.6496308758040628,
+      "net_r": 1.6496308758040628,
+      "exit_reason": "TIME_STOP_2H",
+      "quant_score": 9,
+      "orb_time": "2026-11-14T12:55:00+00:00",
+      "quant_time": "2026-11-14T12:45:00+00:00"
     }
   ]
 }
