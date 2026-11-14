@@ -334,13 +334,22 @@
     "B-ATOM_USDT|2026-11-14 21:00:00|SL_Hit_Exit_Locked_1:2.0",
     "B-VIRTUAL_USDT|2026-11-14 21:00:00|SL_Hit_Exit_Locked_1:2.0",
     "B-AIN_USDT|2026-11-14 21:00:00|Stop_Loss_Hit",
-    "B-LAB_USDT|2026-11-14 21:00:00|Profit_Locked_at_1:2"
+    "B-LAB_USDT|2026-11-14 21:00:00|Profit_Locked_at_1:2",
+    "B-XAU_USDT|2026-11-14 21:15:00|Valid_Bearish_Breakout_SELL",
+    "B-DOGE_USDT|2026-11-14 21:15:00|SL_Hit_Exit_Locked_1:2.0",
+    "B-UAI_USDT|2026-11-14 21:15:00|SL_Hit_Exit_Locked_1:2.0",
+    "B-ARB_USDT|2026-11-14 21:15:00|SL_Hit_Exit_Locked_1:2.0",
+    "B-XLM_USDT|2026-11-14 21:15:00|SL_Hit_Exit_Locked_1:2.0",
+    "B-PAXG_USDT|2026-11-14 21:15:00|Valid_Bearish_Breakout_SELL",
+    "B-DOT_USDT|2026-11-14 21:15:00|SL_Hit_Exit_Locked_1:2.0",
+    "B-AERO_USDT|2026-11-14 21:15:00|Valid_Bullish_Breakout_BUY",
+    "B-LAB_USDT|2026-11-14 21:15:00|SL_Hit_Exit_Locked_1:2.0"
   ],
   "open": [
     "B-BNB_USDT",
-    "B-DOGE_USDT",
     "B-JUP_USDT",
     "B-KAVA_USDT",
+    "B-PAXG_USDT",
     "B-SOPH_USDT"
   ]
 }
