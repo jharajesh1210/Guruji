@@ -1,1 +1,2 @@
-
+strategy,pair,side,session,entry_time,exit_time,entry,exit,stop_initial,stop_final,target,quantity,notional_usdt,margin_est_usdt,leverage,gross_pnl_usdt,fees_gst_usdt,net_pnl_usdt,net_r,exit_reason,quant_score,orb_time,quant_time
+PART-07_CONFLUENCE,B-HYPE_USDT,SHORT,LONDON,2026-11-14T12:40:00+00:00,2026-11-14T14:35:00+00:00,67.935,66.993,69.972903,69.972903,59.783388,0.4907004896700186,33.335737765732716,1.1111912588577573,30.0,0.4622398612691611,0.0393361705635646,0.4229036907055965,0.4229036907055965,TIME_STOP_2H,7,2026-11-14T12:40:00+00:00,2026-11-14T12:30:00+00:00
