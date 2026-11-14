@@ -77,7 +77,15 @@
     "B-ZEC_USDT|2026-11-14 17:45:00|Valid_Bearish_Breakout_SELL",
     "B-BNB_USDT|2026-11-14 17:45:00|Stop_Loss_Hit",
     "B-ARB_USDT|2026-11-14 17:45:00|Valid_Bullish_Breakout_BUY",
-    "B-AERO_USDT|2026-11-14 17:45:00|Valid_Bearish_Breakout_SELL"
+    "B-AERO_USDT|2026-11-14 17:45:00|Valid_Bearish_Breakout_SELL",
+    "B-BARD_USDT|2026-11-14 18:00:00|Stop_Loss_Hit",
+    "B-UNI_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL",
+    "B-BULLA_USDT|2026-11-14 18:00:00|Stop_Loss_Hit",
+    "B-WLD_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL",
+    "B-DASH_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL",
+    "B-H_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL",
+    "B-HUMA_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL",
+    "B-GRASS_USDT|2026-11-14 18:00:00|Valid_Bearish_Breakout_SELL"
   ],
   "open": [
     "B-BTC_USDT",
