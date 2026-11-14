@@ -379,11 +379,12 @@ def process_open(pair, pos, bar, ts, state, closed_rows):
     long_side = side == "LONG"
     cfg = SESSION_CONFIG.get(pos.get("session"), SESSION_CONFIG["NY"])
     local_ts = pd.Timestamp(ts).tz_convert(cfg["tz"])
+    entry_local_ts = pd.Timestamp(pos["entry_time"]).tz_convert(cfg["tz"])
     local_minute = local_ts.hour * 60 + local_ts.minute
     session_end = hm(cfg["end"])
 
-    # Flatten after the configured session closes; never carry PART-07 positions overnight.
-    if local_minute >= session_end:
+    # Flatten after the configured session closes; also recover stale positions after a missed run.
+    if local_ts.date() > entry_local_ts.date() or local_minute >= session_end:
         price = float(bar.close)
         row = close_trade(pair, pos, price, ts.isoformat(), "SESSION_END")
         closed_rows.append(row)
