@@ -224,6 +224,7 @@ def atr(d, n=14):
 
 
 def approximate_poc(d):
+    # Candle-OHLCV approximation only; exchange tick-level volume-at-price is not available here.
     q = d.tail(96)
     if len(q) < 20 or q.volume.sum() <= 0:
         return float(q.close.iloc[-1])
