@@ -101,10 +101,10 @@
     "B-WLFI_USDT|2026-11-14 18:15:00|Valid_Bullish_Breakout_BUY",
     "B-1000BONK_USDT|2026-11-14 18:15:00|Next_Session_PDL_Break_Exit_1:0.3",
     "B-RENDER_USDT|2026-11-14 18:15:00|Valid_Bearish_Breakout_SELL",
-    "B-PLAY_USDT|2026-11-14 18:15:00|Next_Session_PDL_Break_Exit_1:0.25"
+    "B-PLAY_USDT|2026-11-14 18:15:00|Next_Session_PDL_Break_Exit_1:0.25",
+    "B-BTC_USDT|2026-11-14 18:15:00|Stop_Loss_Hit"
   ],
   "open": [
-    "B-BTC_USDT",
     "B-CAP_USDT",
     "B-DOGE_USDT",
     "B-ETC_USDT",
