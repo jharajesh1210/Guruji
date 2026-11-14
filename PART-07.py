@@ -13,7 +13,7 @@ Existing strategy files are not modified. No live order endpoints are used.
 
 import os, json, time, logging
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
@@ -34,7 +34,7 @@ ACTIVE_URL = BASE + "/exchange/v1/derivatives/futures/data/active_instruments"
 PRICE_URL = PUB + "/market_data/v3/current_prices/futures/rt"
 
 # Capital/risk configuration selected for PART-07
-MARGIN_USDT = float(os.getenv("PAPER_MARGIN_USDT", "50"))
+MARGIN_USDT = float(os.getenv("PAPER_MARGIN_USDT", "100"))
 LEVERAGE = float(os.getenv("PAPER_LEVERAGE", "30"))
 MAX_NOTIONAL = MARGIN_USDT * LEVERAGE
 RISK_FRACTION = float(os.getenv("RISK_FRACTION", "0.01"))
@@ -64,7 +64,7 @@ MIN_SESSION_FILL = 0.95
 # PRO QUANT engine — source thresholds retained
 ATR_MULT = 1.5
 QUANT_TARGET_R = 4.0
-QUANT_TIME_STOP_BARS = 8       # 8 x 15m = 2 hours
+QUANT_TIME_STOP_MINUTES = 120  # elapsed wall-clock time; scanner evaluates on closed 5m bars
 QUANT_MIN_TREND_BARS = 205
 QUANT_MIN_15M_BARS = 110
 QUANT_MIN_1H_BARS = 60
@@ -74,7 +74,7 @@ TAKER_FEE = 0.0005
 GST_ON_FEE = 0.18
 
 SESSION_CONFIG = {
-    "NY": {"tz": timezone.utc, "start": "13:30", "end": "21:00"},
+    "NY": {"tz": ZoneInfo("America/New_York"), "start": "09:30", "end": "17:00"},
     "LONDON": {"tz": ZoneInfo("Europe/London"), "start": "08:00", "end": "15:30"},
 }
 
@@ -322,6 +322,7 @@ def orb_confirmation(d5, session):
         return None
     prev = groups[sorted(groups)[-1]]
     pdh = float(prev.high.max())
+    pdl = float(prev.low.min())
     orb = g.iloc[:ORB_CANDLES]
     orb_high, orb_low = float(orb.high.max()), float(orb.low.min())
     bar = g.iloc[-1]
@@ -340,8 +341,8 @@ def orb_confirmation(d5, session):
     run_high = float(g.loc[:ts].high.max())
     long_ok = (c > max(orb_high,pdh) and c > o and
                (c-l)/rng >= 1-ORB_CLOSE_EXTREME)
-    short_ok = (run_high >= pdh*0.999 and c < orb_low and
-                run_high < pdh*1.01 and c < o and
+    # Short setup must clear BOTH the ORB low and previous-session low (PDL).
+    short_ok = (c < min(orb_low,pdl) and c < o and
                 (h-c)/rng >= 1-ORB_CLOSE_EXTREME)
     if long_ok and c > orb_low:
         return {"side":"LONG","entry":c,"stop":orb_low,"time":ts.isoformat(),"session":session}
@@ -376,6 +377,27 @@ def close_trade(pair, pos, price, timestamp, reason):
 def process_open(pair, pos, bar, ts, state, closed_rows):
     side = pos["side"]
     long_side = side == "LONG"
+    cfg = SESSION_CONFIG.get(pos.get("session"), SESSION_CONFIG["NY"])
+    local_ts = pd.Timestamp(ts).tz_convert(cfg["tz"])
+    local_minute = local_ts.hour * 60 + local_ts.minute
+    session_end = hm(cfg["end"])
+
+    # Flatten after the configured session closes; never carry PART-07 positions overnight.
+    if local_minute >= session_end:
+        price = float(bar.close)
+        row = close_trade(pair, pos, price, ts.isoformat(), "SESSION_END")
+        closed_rows.append(row)
+        del state["open"][pair]
+        telegram(f"PART-07 PAPER EXIT {side}\\n{pair}\\nReason: SESSION_END\\nNet P&L: {row['net_pnl_usdt']:.4f} USDT")
+        return
+
+    # In the final 45 minutes, protect a trade once it has reached +0.5R.
+    fav = (float(bar.high)-pos["entry"]) if long_side else (pos["entry"]-float(bar.low))
+    r_now = fav / max(float(pos["risk_dist"]), 1e-12)
+    if local_minute >= session_end - ORB_PROTECT_MIN and r_now >= ORB_PROTECT_MIN_R:
+        be_stop = float(pos["entry"]) + (ORB_PROTECT_LOCK_R if long_side else -ORB_PROTECT_LOCK_R) * float(pos["risk_dist"])
+        pos["stop"] = max(float(pos["stop"]), be_stop) if long_side else min(float(pos["stop"]), be_stop)
+
     old_stop = float(pos["stop"])
     hit_sl = bar.low <= old_stop if long_side else bar.high >= old_stop
     hit_tp = bar.high >= pos["target"] if long_side else bar.low <= pos["target"]
@@ -386,22 +408,23 @@ def process_open(pair, pos, bar, ts, state, closed_rows):
             "LOCKED_PROFIT" if ((old_stop > pos["entry"]) if long_side else (old_stop < pos["entry"])) else "SL")
         closed_rows.append(close_trade(pair,pos,float(price),ts.isoformat(),reason))
         del state["open"][pair]
-        telegram(f"PART-07 PAPER EXIT {side}\n{pair}\nExit: {price:.8g}\nReason: {reason}\nNet P&L: {closed_rows[-1]['net_pnl_usdt']:.4f} USDT")
+        telegram(f"PART-07 PAPER EXIT {side}\\n{pair}\\nExit: {price:.8g}\\nReason: {reason}\\nNet P&L: {closed_rows[-1]['net_pnl_usdt']:.4f} USDT")
         return
-    fav = (float(bar.high)-pos["entry"]) if long_side else (pos["entry"]-float(bar.low))
-    r_now = fav / pos["risk_dist"]
+
     if r_now >= 3 and pos.get("lock",0) < 3:
         pos["stop"] = pos["entry"] + (3 if long_side else -3)*pos["risk_dist"]
         pos["lock"] = 3
     elif r_now >= 2 and pos.get("lock",0) < 2:
         pos["stop"] = pos["entry"] + (2 if long_side else -2)*pos["risk_dist"]
         pos["lock"] = 2
-    pos["bars"] += 1
-    if pos["bars"] >= QUANT_TIME_STOP_BARS:
+
+    entry_ts = pd.Timestamp(pos["entry_time"])
+    bar_close_ts = pd.Timestamp(ts) + pd.Timedelta(minutes=5)
+    if bar_close_ts - entry_ts >= pd.Timedelta(minutes=QUANT_TIME_STOP_MINUTES):
         row = close_trade(pair,pos,float(bar.close),ts.isoformat(),"TIME_STOP_2H")
         closed_rows.append(row)
         del state["open"][pair]
-        telegram(f"PART-07 PAPER EXIT {side}\n{pair}\nReason: TIME_STOP_2H\nNet P&L: {row['net_pnl_usdt']:.4f} USDT")
+        telegram(f"PART-07 PAPER EXIT {side}\\n{pair}\\nReason: TIME_STOP_2H\\nNet P&L: {row['net_pnl_usdt']:.4f} USDT")
     else:
         state["open"][pair] = pos
 
