@@ -211,6 +211,7 @@ def mins_to_session_end(ts, session):
 
 
 def send_telegram(message):
+    message = f"[PART-06] {message}"   # every alert starts with the bot name
     token = os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN")
     chat_id = os.getenv("TG_CHAT_ID") or os.getenv("CHAT_ID")
     if not token or not chat_id:
@@ -291,7 +292,7 @@ def live_process_pair(pair, state, session, data=None):
             trade = _close_trade(pos["side"], float(pos["entry"]), float(pos["risk"]),
                                  exit_price, pos["t0"], g.index[-1].isoformat(), "SESSION_END")
             record_trade(state, trade, pair, session, float(pos.get("notional", MAX_NOTIONAL_USDT)))
-            send_telegram(f"COINDCX PART-06 {session} {pos['side']} PAPER EXIT\n{pair}\nExit: {exit_price}\nReason: SESSION_END\nNet PnL: {trade['pnl_usdt_net']:.4f} USDT")
+            send_telegram(f"COINDCX {session} {pos['side']} PAPER EXIT\n{pair}\nExit: {exit_price}\nReason: SESSION_END\nNet PnL: {trade['pnl_usdt_net']:.4f} USDT")
             state["positions"].pop(key, None)
         return
 
@@ -377,7 +378,7 @@ def live_process_pair(pair, state, session, data=None):
                     bar_key = f"{session}:{stamp}:{side}"
                     state["bar_entries"][bar_key] = state["bar_entries"].get(bar_key, 0) + 1
                     qty = notional / c
-                    send_telegram(f"COINDCX PART-06 {session} SWEEP-ORB {side} PAPER\n{pair}\nEntry: {c}\nSL: {sl}\nTP: {pos['tp']}\nRisk: {RISK_PER_TRADE_USDT} USDT ({risk/c*100:.2f}%)")
+                    send_telegram(f"COINDCX {session} SWEEP-ORB {side} PAPER\n{pair}\nEntry: {c}\nSL: {sl}\nTP: {pos['tp']}\nRisk: {RISK_PER_TRADE_USDT} USDT ({risk/c*100:.2f}%)")
                     
         else:
             is_long = pos["side"] == "LONG"
@@ -392,7 +393,7 @@ def live_process_pair(pair, state, session, data=None):
                 reason = "TARGET_4R" if not hit_sl else ("BREAKEVEN" if sl == entry else ("LOCKED_PROFIT" if ((sl > entry) if is_long else (sl < entry)) else "SL"))
                 trade = _close_trade(pos["side"], entry, risk, exit_price, pos["t0"], stamp, reason)
                 record_trade(state, trade, pair, session, notional)
-                send_telegram(f"COINDCX PART-06 {session} {pos['side']} EXIT\n{pair}\nReason: {reason}\nNet PnL: {trade['pnl_usdt_net']:.4f} USDT")
+                send_telegram(f"COINDCX {session} {pos['side']} EXIT\n{pair}\nReason: {reason}\nNet PnL: {trade['pnl_usdt_net']:.4f} USDT")
                 state["positions"].pop(key, None)
             else:
                 close_r = ((c - entry) if is_long else (entry - c)) / risk
@@ -400,7 +401,7 @@ def live_process_pair(pair, state, session, data=None):
                 if held >= MAX_HOLD_CANDLES and close_r < TIME_STOP_MIN_R:
                     trade = _close_trade(pos["side"], entry, risk, c, pos["t0"], stamp, "TIME_STOP")
                     record_trade(state, trade, pair, session, notional)
-                    send_telegram(f"COINDCX PART-06 {session} {pos['side']} EXIT\n{pair}\nReason: TIME_STOP\nNet PnL: {trade['pnl_usdt_net']:.4f} USDT")
+                    send_telegram(f"COINDCX {session} {pos['side']} EXIT\n{pair}\nReason: TIME_STOP\nNet PnL: {trade['pnl_usdt_net']:.4f} USDT")
                     state["positions"].pop(key, None)
                 else:
                     r_now = ((h - entry) if is_long else (entry - l)) / risk

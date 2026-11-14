@@ -237,6 +237,7 @@ def mins_to_session_end(ts, session):
 
 
 def send_telegram(message):
+    message = f"[PART-04] {message}"   # every alert starts with the bot name
     token = os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN")
     chat_id = os.getenv("TG_CHAT_ID") or os.getenv("CHAT_ID")
     if not token or not chat_id:
