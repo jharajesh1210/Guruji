@@ -1,0 +1,2 @@
+timestamp,pair,symbol,session,side,quant_score,entry,stop,target_4r,margin_est_usdt,notional_usdt,leverage,risk_budget_usdt,market_cap_rank,global_spot_volume_24h_usd,coindcx_est_24h_quote_volume,orb_time,quant_time,mode,confirmation
+2026-11-14T12:40:00+00:00,B-HYPE_USDT,HYPE,LONDON,SHORT,7,67.935,69.972903,59.783388,1.1111912588577573,33.335737765732716,30.0,1.0,10,957126549.0,50543916492.33959,2026-11-14T12:40:00+00:00,2026-11-14T12:30:00+00:00,PAPER_ONLY,ORB_AND_PRO_QUANT_SAME_DIRECTION
