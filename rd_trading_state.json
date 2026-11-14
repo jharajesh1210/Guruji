@@ -67,10 +67,12 @@
     "B-ARIA_USDT|2026-11-14 16:45:00|Valid_Bullish_Breakout_BUY",
     "B-DODOX_USDT|2026-11-14 16:45:00|Next_Session_PDH_Break_Exit_1:1.81",
     "B-KGEN_USDT|2026-11-14 16:45:00|Valid_Bullish_Breakout_BUY",
-    "B-TRUMP_USDT|2026-11-14 16:45:00|Valid_Bearish_Breakout_SELL"
+    "B-TRUMP_USDT|2026-11-14 16:45:00|Valid_Bearish_Breakout_SELL",
+    "B-UNI_USDT|2026-11-14 17:00:00|Stop_Loss_Hit",
+    "B-ONDO_USDT|2026-11-14 17:00:00|Next_Session_PDL_Break_Exit_1:0.25",
+    "B-AIN_USDT|2026-11-14 17:00:00|Stop_Loss_Hit"
   ],
   "open": [
-    "B-AIN_USDT",
     "B-BNB_USDT",
     "B-BTC_USDT",
     "B-CAP_USDT",
@@ -82,7 +84,6 @@
     "B-SOL_USDT",
     "B-SOPH_USDT",
     "B-SUI_USDT",
-    "B-UNI_USDT",
     "B-XAU_USDT",
     "B-XLM_USDT"
   ]
