@@ -13,10 +13,16 @@ PRICE_URL = PUB + "/market_data/v3/current_prices/futures/rt"
 MIN_24H_VOLUME_USDT = float(os.getenv("MIN_24H_VOLUME_USDT", "10000000"))  # 10 million USDT
 CANDLE_BARS = int(os.getenv("CANDLE_BARS", "300"))  # 15m bars fetched per coin
 MAX_TICKER_AGE_SEC = int(os.getenv("MAX_TICKER_AGE_SEC", "600"))  # ignore stale/delisted tickers
-MAX_NEW_ENTRIES_PER_CYCLE = int(os.getenv("MAX_NEW_ENTRIES_PER_CYCLE", "5"))  # cap simultaneous new entries
+MAX_NEW_ENTRIES_PER_CYCLE = int(os.getenv("MAX_NEW_ENTRIES_PER_CYCLE", "5"))  # cap new entries per cycle
+MAX_OPEN_TRADES = int(os.getenv("MAX_OPEN_TRADES", "5"))  # cap on trades open at the same time
 BARS_PER_24H = 96  # 15m candles in 24 hours
 HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "RD-TRADING-SCANNER/1.0"})
+
+def _px(x):
+    """Round a price to 6 significant digits (2 decimals hid prices like 0.0204 as 0.02)."""
+    return float(f"{float(x):.6g}")
+
 
 def assign_session(timestamp):
     """
@@ -60,7 +66,9 @@ def manage_open_trade(active_trade, current_candle, current_session_pdh, current
     direction = active_trade['direction']
     entry_price = active_trade['entry_price']
     sl = active_trade['sl']
-    risk_per_unit = abs(entry_price - sl)
+    # BUG FIX: risk must stay the ORIGINAL entry->SL distance. Recomputing it from the moved
+    # (locked) SL doubled the risk after a lock, which doubled PnL and delayed 1:3/1:4/1:5 locks.
+    risk_per_unit = active_trade.get('risk') or abs(entry_price - sl)
     
     close_price = current_candle['Close']
     high_price = current_candle['High']
@@ -91,19 +99,22 @@ def manage_open_trade(active_trade, current_candle, current_session_pdh, current
         broke_new_pdh = high_price >= current_session_pdh
         broke_new_pdl = low_price <= current_session_pdl
         
-        if direction == "BUY" and broke_new_pdh:
+        # BUG FIX: old code forced a minimum +1R profit (max(1.0, ...)) even when the new
+        # session's PDH/PDL was on the wrong side of entry, booking fake profit.
+        # Now the exit counts only if the level is beyond entry, and the real reward is used.
+        if direction == "BUY" and broke_new_pdh and current_session_pdh > entry_price:
             current_reward = current_session_pdh - entry_price
-            locked_rr = max(1.0, current_reward / risk_per_unit if risk_per_unit > 0 else 1.0)
+            rr = current_reward / risk_per_unit if risk_per_unit > 0 else 0.0
             position_size_usdt = 100 * 30
-            profit_usdt = (position_size_usdt / entry_price) * (locked_rr * risk_per_unit)
-            return f"Next_Session_PDH_Break_Exit_1:{round(locked_rr, 1)}", profit_usdt, None
+            profit_usdt = (position_size_usdt / entry_price) * current_reward
+            return f"Next_Session_PDH_Break_Exit_1:{round(rr, 2)}", profit_usdt, None
             
-        elif direction == "SELL" and broke_new_pdl:
+        elif direction == "SELL" and broke_new_pdl and current_session_pdl < entry_price:
             current_reward = entry_price - current_session_pdl
-            locked_rr = max(1.0, current_reward / risk_per_unit if risk_per_unit > 0 else 1.0)
+            rr = current_reward / risk_per_unit if risk_per_unit > 0 else 0.0
             position_size_usdt = 100 * 30
-            profit_usdt = (position_size_usdt / entry_price) * (locked_rr * risk_per_unit)
-            return f"Next_Session_PDL_Break_Exit_1:{round(locked_rr, 1)}", profit_usdt, None
+            profit_usdt = (position_size_usdt / entry_price) * current_reward
+            return f"Next_Session_PDL_Break_Exit_1:{round(rr, 2)}", profit_usdt, None
 
     # Dynamic Profit Locking Evaluation (1:2, 1:3, 1:4, 1:5)
     current_reward = (high_price - entry_price) if direction == "BUY" else (entry_price - low_price)
@@ -212,6 +223,7 @@ def run_rd_trading_system(df, news_events=None, news_buffer_minutes=30):
                                         'direction': 'BUY',
                                         'entry_price': row['Close'],
                                         'sl': orb_low,
+                                        'risk': abs(row['Close'] - orb_low),
                                         'locked_rr': 0.0,
                                         'entry_session': (date, sess_name),
                                         'carried_over': False
@@ -225,6 +237,7 @@ def run_rd_trading_system(df, news_events=None, news_buffer_minutes=30):
                                         'direction': 'SELL',
                                         'entry_price': row['Close'],
                                         'sl': orb_high,
+                                        'risk': abs(orb_high - row['Close']),
                                         'locked_rr': 0.0,
                                         'entry_session': (date, sess_name),
                                         'carried_over': False
@@ -236,11 +249,11 @@ def run_rd_trading_system(df, news_events=None, news_buffer_minutes=30):
                 results.append({
                     'Timestamp': current_ts,
                     'Session': sess_name,
-                    'Close': round(row['Close'], 2),
-                    'ORH': round(orb_high, 2),
-                    'ORL': round(orb_low, 2),
-                    'Session_PDH': round(curr_pdh, 2) if np.isfinite(curr_pdh) else np.nan,
-                    'Session_PDL': round(curr_pdl, 2) if np.isfinite(curr_pdl) else np.nan,
+                    'Close': _px(row['Close']),
+                    'ORH': _px(orb_high),
+                    'ORL': _px(orb_low),
+                    'Session_PDH': _px(curr_pdh) if np.isfinite(curr_pdh) else np.nan,
+                    'Session_PDL': _px(curr_pdl) if np.isfinite(curr_pdl) else np.nan,
                     'News_Filter': news_restricted,
                     'Status': trade_status,
                     'Locked_PnL_USDT': round(profit, 2)
@@ -422,6 +435,17 @@ def scan_and_alert(news_events=None, news_buffer_minutes=30):
     """One auto-run cycle: volume filter -> scan -> Telegram for NEW events only."""
     st = _load_state()
     sent = set(st["sent"])
+    if "open" not in st:
+        # first run with trade tracking: rebuild open trades from alerts already sent
+        rebuilt = set()
+        for k in st["sent"]:
+            pair, _, status = k.split("|", 2)
+            if status in ENTRY_STATUSES:
+                rebuilt.add(pair)
+            elif status.startswith(EXIT_PREFIXES):
+                rebuilt.discard(pair)
+        st["open"] = sorted(rebuilt)
+    open_pairs = set(st["open"])
     pairs = fetch_liquid_pairs()
     print(f"[{SCRIPT_NAME}] Ticker volume filter >= {MIN_24H_VOLUME_USDT:,.0f} USDT: {len(pairs)} coins pass")
     new_rows = []
@@ -444,9 +468,17 @@ def scan_and_alert(news_events=None, news_buffer_minutes=30):
                 key = f"{p['pair']}|{row['Timestamp']}|{row['Status']}"
                 if key in sent:
                     continue
+                if kind in ("LOCK", "EXIT") and p["pair"] not in open_pairs:
+                    # Trade was never announced (opened before alerts started, or skipped by the
+                    # entry cap): no orphan LOCK/EXIT without a matching ENTRY.
+                    sent.add(key)
+                    st["sent"].append(key)
+                    continue
                 if kind == "ENTRY":
                     # coins are processed highest 24h volume first; cap new entries per cycle
-                    if entries_sent >= MAX_NEW_ENTRIES_PER_CYCLE:
+                    # cap per cycle AND on total open trades (a per-cycle cap alone lets new
+                    # entries pile up every 5 minutes)
+                    if entries_sent >= MAX_NEW_ENTRIES_PER_CYCLE or len(open_pairs) >= MAX_OPEN_TRADES:
                         sent.add(key)
                         st["sent"].append(key)
                         print(f"entry cap reached, skipped {p['pair']}")
@@ -456,6 +488,10 @@ def scan_and_alert(news_events=None, news_buffer_minutes=30):
                         (os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN"))):
                     sent.add(key)
                     st["sent"].append(key)
+                    if kind == "ENTRY":
+                        open_pairs.add(p["pair"])
+                    elif kind == "EXIT":
+                        open_pairs.discard(p["pair"])
                 new_rows.append({"Script": SCRIPT_NAME, "Pair": p["pair"], "Kind": kind,
                                  **row.to_dict(), "Volume_24h_USDT": round(p["volume_24h_usdt"])})
         except Exception as e:
@@ -463,6 +499,7 @@ def scan_and_alert(news_events=None, news_buffer_minutes=30):
         _time.sleep(0.2)
     if new_rows:
         pd.DataFrame(new_rows).to_csv(SIGNALS_FILE, mode="a", header=not os.path.exists(SIGNALS_FILE), index=False)
+    st["open"] = sorted(open_pairs)
     _save_state(st)
     print(f"[{SCRIPT_NAME}] cycle done: {len(new_rows)} new event(s), "
           f"{candle_rejected} coin(s) rejected by 24h candle-volume check")
