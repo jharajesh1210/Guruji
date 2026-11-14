@@ -26,7 +26,7 @@ jobs:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       CHAT_ID: ${{ secrets.CHAT_ID }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      PAPER_MARGIN_USDT: "50"
+      PAPER_MARGIN_USDT: "100"
       PAPER_LEVERAGE: "30"
       MIN_24H_VOLUME_USDT: "10000000"
       TOP_N: "100"
