@@ -388,7 +388,7 @@ def process_open(pair, pos, bar, ts, state, closed_rows):
         row = close_trade(pair, pos, price, ts.isoformat(), "SESSION_END")
         closed_rows.append(row)
         del state["open"][pair]
-        telegram(f"PART-07 PAPER EXIT {side}\\n{pair}\\nReason: SESSION_END\\nNet P&L: {row['net_pnl_usdt']:.4f} USDT")
+        telegram(f"PART-07 PAPER EXIT {side}\n{pair}\nReason: SESSION_END\nNet P&L: {row['net_pnl_usdt']:.4f} USDT")
         return
 
     # In the final 45 minutes, protect a trade once it has reached +0.5R.
@@ -408,7 +408,7 @@ def process_open(pair, pos, bar, ts, state, closed_rows):
             "LOCKED_PROFIT" if ((old_stop > pos["entry"]) if long_side else (old_stop < pos["entry"])) else "SL")
         closed_rows.append(close_trade(pair,pos,float(price),ts.isoformat(),reason))
         del state["open"][pair]
-        telegram(f"PART-07 PAPER EXIT {side}\\n{pair}\\nExit: {price:.8g}\\nReason: {reason}\\nNet P&L: {closed_rows[-1]['net_pnl_usdt']:.4f} USDT")
+        telegram(f"PART-07 PAPER EXIT {side}\n{pair}\nExit: {price:.8g}\nReason: {reason}\nNet P&L: {closed_rows[-1]['net_pnl_usdt']:.4f} USDT")
         return
 
     if r_now >= 3 and pos.get("lock",0) < 3:
@@ -424,7 +424,7 @@ def process_open(pair, pos, bar, ts, state, closed_rows):
         row = close_trade(pair,pos,float(bar.close),ts.isoformat(),"TIME_STOP_2H")
         closed_rows.append(row)
         del state["open"][pair]
-        telegram(f"PART-07 PAPER EXIT {side}\\n{pair}\\nReason: TIME_STOP_2H\\nNet P&L: {row['net_pnl_usdt']:.4f} USDT")
+        telegram(f"PART-07 PAPER EXIT {side}\n{pair}\nReason: TIME_STOP_2H\nNet P&L: {row['net_pnl_usdt']:.4f} USDT")
     else:
         state["open"][pair] = pos
 
