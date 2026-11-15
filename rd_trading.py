@@ -12,50 +12,39 @@ PUB = "https://public.coindcx.com"
 CANDLE_URL = PUB + "/market_data/candlesticks"
 PRICE_URL = PUB + "/market_data/v3/current_prices/futures/rt"
 MIN_24H_VOLUME_USDT = float(os.getenv("MIN_24H_VOLUME_USDT", "10000000"))  # 10 million USDT
-# Pichle poore din ka PDH/PDL nikalne ke liye kam se kam ~2 din ka data chahiye (96 x 15m = 1 din)
 CANDLE_BARS = int(os.getenv("CANDLE_BARS", "500"))
-MAX_TICKER_AGE_SEC = int(os.getenv("MAX_TICKER_AGE_SEC", "600"))  # ignore stale/delisted tickers
-MAX_NEW_ENTRIES_PER_CYCLE = int(os.getenv("MAX_NEW_ENTRIES_PER_CYCLE", "5"))  # cap new entries per cycle
-MAX_OPEN_TRADES = int(os.getenv("MAX_OPEN_TRADES", "5"))  # cap on trades open at the same time
-BARS_PER_24H = 96  # 15m candles in 24 hours
-MIN_DAY_BARS = int(os.getenv("MIN_DAY_BARS", "90"))  # itne candles se kam wala din "poora" nahi maana jaata
+MAX_TICKER_AGE_SEC = int(os.getenv("MAX_TICKER_AGE_SEC", "600"))
+MAX_NEW_ENTRIES_PER_CYCLE = int(os.getenv("MAX_NEW_ENTRIES_PER_CYCLE", "5"))
+MAX_OPEN_TRADES = int(os.getenv("MAX_OPEN_TRADES", "5"))
+BARS_PER_24H = 96  
+MIN_DAY_BARS = int(os.getenv("MIN_DAY_BARS", "90"))
 
 # ---- Trade / risk config ----
 CAPITAL_USDT = float(os.getenv("CAPITAL_USDT", "100"))
 LEVERAGE = float(os.getenv("LEVERAGE", "30"))
-POSITION_USDT = CAPITAL_USDT * LEVERAGE                      # 100 x 30 = 3000 USDT
-MAX_LOSS_USDT = float(os.getenv("MAX_LOSS_USDT", "100"))     # ek trade ka max loss
-MAX_RISK_PCT = float(os.getenv("MAX_RISK_PCT", "2.0"))       # SL entry se max itne % door
-MIN_RISK_PCT = float(os.getenv("MIN_RISK_PCT", "0.15"))      # isse tight SL wali entry skip
-SL_MODE = os.getenv("SL_MODE", "candle").lower()             # "candle" = breakout candle low/high, "mid" = range midpoint
-# Effective cap: MAX_RISK_PCT aur (MAX_LOSS_USDT / position) mein se jo chhota ho
+POSITION_USDT = CAPITAL_USDT * LEVERAGE                      
+MAX_LOSS_USDT = float(os.getenv("MAX_LOSS_USDT", "100"))     
+MAX_RISK_PCT = float(os.getenv("MAX_RISK_PCT", "2.0"))       
+MIN_RISK_PCT = float(os.getenv("MIN_RISK_PCT", "0.15"))      
+SL_MODE = os.getenv("SL_MODE", "candle").lower()             
 RISK_CAP_PCT = min(MAX_RISK_PCT, MAX_LOSS_USDT / POSITION_USDT * 100)
 
-# ---- Live (alert) mode config ----
-MAX_CATCHUP_BARS = int(os.getenv("MAX_CATCHUP_BARS", "8"))   # bina open trade wale coin par itni purani candles tak hi signal dekhna
-FIRST_RUN_BARS = 2                                           # coin pehli baar dikhe to last itni candles dekhna
+MAX_CATCHUP_BARS = int(os.getenv("MAX_CATCHUP_BARS", "8"))   
+FIRST_RUN_BARS = 2                                           
 
 HTTP = requests.Session()
 HTTP.headers.update({"User-Agent": "RD-TRADING-SCANNER/1.0"})
 
 
 def _px(x):
-    """Round a price to 6 significant digits."""
     return float(f"{float(x):.6g}")
 
 
 def _pnl(entry, price_move):
-    """Price move (price units) ka USDT PnL: position 100 USDT x 30X = 3000 USDT."""
     return POSITION_USDT / entry * price_move
 
 
 def assign_session(timestamp):
-    """
-    Assigns trading session based on IST time:
-    - Asian Session: 05:30 to 13:30
-    - London Session: 13:30 to 18:30
-    - NY Session: 18:30 to 05:30 (agle din subah tak)
-    """
     t = pd.to_datetime(timestamp).time()
     if time(5, 30) <= t < time(13, 30):
         return 'Asian'
@@ -66,12 +55,8 @@ def assign_session(timestamp):
     return 'Other'
 
 
-# ======================= DATA PREP: sessions + PREVIOUS DAY PDH/PDL =======================
+# ======================= DATA PREP: sessions + MACD + PDH/PDL =======================
 def prepare(df):
-    """
-    - Session / Date column banata hai. Trading day = 05:30 IST se agle din 05:30 IST tak.
-    - Har poore din ka High/Low nikalta hai (daily table), jisse "pichle din ka PDH/PDL" milta hai.
-    """
     df = df.copy()
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     df = df.sort_values('Timestamp').reset_index(drop=True)
@@ -80,29 +65,29 @@ def prepare(df):
     df['Date'] = (df['Timestamp'] - pd.to_timedelta(after_midnight_ny.astype(int), unit='D')).dt.date
     df['VolMA20'] = df['Volume'].shift(1).rolling(window=20, min_periods=10).mean()
 
+    # --- MACD Calculation Added ---
+    exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = exp1 - exp2
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    df['Prev_MACD'] = df['MACD'].shift(1)
+    df['Prev_Signal'] = df['MACD_Signal'].shift(1)
+    # ------------------------------
+
     daily = df.groupby('Date').agg(DH=('High', 'max'), DL=('Low', 'min'), N=('High', 'size'))
-    daily = daily[daily['N'] >= MIN_DAY_BARS]  # adhoora din (data ki shuruaat ka) PDH/PDL nahi banega
+    daily = daily[daily['N'] >= MIN_DAY_BARS]  
     return df, daily
 
 
 def levels_for(date, daily):
-    """Din `date` ke liye pichle din ka (PDH, PDL). Pichla poora din na ho to (None, None)."""
     prev = date - timedelta(days=1)
     if prev in daily.index:
         return float(daily.at[prev, 'DH']), float(daily.at[prev, 'DL'])
     return None, None
 
 
-# ======================= STOP LOSS (tight + capped) =======================
+# ======================= STOP LOSS =======================
 def build_stop(direction, row):
-    """
-    SL breakout candle se:
-      SL_MODE=candle -> BUY: candle ka Low, SELL: candle ka High
-      SL_MODE=mid    -> candle range ka midpoint
-    Phir SL ko entry se max RISK_CAP_PCT tak door rakhte hain
-    (isse 100 USDT max loss bhi cap hota hai).
-    Return: (sl, risk_per_unit). Galat side ka SL ho to risk 0 aata hai (entry skip hogi).
-    """
     entry = float(row['Close'])
     if SL_MODE == "mid":
         sl = (float(row['High']) + float(row['Low'])) / 2
@@ -122,7 +107,6 @@ def build_stop(direction, row):
 
 # ======================= SIGNAL DETECTION =======================
 def detect_signal(row, pdh, pdl):
-    """Ek candle par fake-breakout filter ke saath entry check. Return: (status, new_trade ya None)."""
     high_break = row['High'] > pdh
     close_break = row['Close'] > pdh
     low_break = row['Low'] < pdl
@@ -153,8 +137,8 @@ def detect_signal(row, pdh, pdl):
             'entry_price': entry,
             'sl': float(sl),
             'risk': float(risk),
-            'locked_rr': 0.0,        # abhi tak jo lock SL par lag chuka hai
-            'pending_sl': None,      # naya lock jo AGLI candle se lagega
+            'locked_rr': 0.0,        
+            'pending_sl': None,      
             'pending_rr': 0.0,
             'carried_over': False,
         }
@@ -167,16 +151,8 @@ def detect_signal(row, pdh, pdl):
     return "No_Trade", None
 
 
-# ======================= TRADE MANAGEMENT =======================
+# ======================= TRADE MANAGEMENT (WITH MACD LOSS-EXIT FILTER) =======================
 def manage_open_trade(trade, candle, day_pdh, day_pdl):
-    """
-    Open trade ko ek candle par manage karta hai (order important hai):
-    1. Pichli candle mein bana profit-lock ab SL par lagta hai (lock hamesha agli candle se).
-    2. SL hit check (locked SL ho to locked profit, nahi to -1R).
-    3. Trade agle din tak chala gaya ho to naye din ka PDH/PDL break hone par exit.
-    4. Naya lock (1:2, 1:3, 1:4) ya 1:5 par full exit. Naya lock `pending` mein jaata hai.
-    Loss kabhi MAX_LOSS_USDT se zyada nahi dikhaya jaata.
-    """
     if not trade:
         return "No_Active_Trade", 0.0, None
 
@@ -186,23 +162,52 @@ def manage_open_trade(trade, candle, day_pdh, day_pdl):
     high = float(candle['High'])
     low = float(candle['Low'])
 
-    # 1) Pichli candle ka lock ab apply
+    # 1) Pichli candle ka lock apply karna
     if trade.get('pending_sl') is not None:
         trade['sl'] = trade['pending_sl']
         trade['locked_rr'] = trade['pending_rr']
         trade['pending_sl'] = None
         trade['pending_rr'] = 0.0
 
-    # 2) Stop loss
+    # 2) Stop loss check
     sl = trade['sl']
-    if (is_buy and low <= sl) or ((not is_buy) and high >= sl):
-        locked = trade['locked_rr']
-        rr = locked if locked > 0 else -1.0
-        pnl = max(_pnl(entry, rr * risk), -MAX_LOSS_USDT)
-        status = f"SL_Hit_Exit_Locked_1:{locked:g}" if locked > 0 else "Stop_Loss_Hit"
-        return status, pnl, None
+    sl_hit = (is_buy and low <= sl) or ((not is_buy) and high >= sl)
 
-    # 3) Agle din ka PDH/PDL break (sirf carried-over trade ke liye)
+    if sl_hit:
+        locked = trade['locked_rr']
+        is_loss_exit = (locked <= 0) # Agar profit locked nahi hai, matlab loss exit hai
+
+        if is_loss_exit:
+            # MACD Crossover Check
+            macd_val = float(candle.get('MACD', 0))
+            signal_val = float(candle.get('MACD_Signal', 0))
+            prev_macd = float(candle.get('Prev_MACD', 0))
+            prev_signal = float(candle.get('Prev_Signal', 0))
+
+            # MACD rule sirf SL touch ke time check hota hai (entry/tracking se koi lena-dena nahi):
+            # BUY: MACD signal ke neeche (cross ho chuka) -> exit valid
+            # SELL: MACD signal ke upar (cross ho chuka) -> exit valid
+            bearish_cross = macd_val < signal_val
+            bullish_cross = macd_val > signal_val
+
+            if is_buy and not bearish_cross:
+                # BUY mein loss exit par MACD ne cross nahi kiya -> WAIT KARO (Exit skip)
+                pass 
+            elif (not is_buy) and not bullish_cross:
+                # SELL mein loss exit par MACD ne cross nahi kiya -> WAIT KARO (Exit skip)
+                pass
+            else:
+                # MACD ne confirm kar diya -> Exit
+                rr = -1.0
+                pnl = max(_pnl(entry, rr * risk), -MAX_LOSS_USDT)
+                return "Stop_Loss_Hit_MACD_Confirmed", pnl, None
+        else:
+            # Locked profit par SL hit hua hai, normal exit
+            rr = locked
+            pnl = max(_pnl(entry, rr * risk), -MAX_LOSS_USDT)
+            return f"SL_Hit_Exit_Locked_1:{locked:g}", pnl, None
+
+    # 3) Agle din ka PDH/PDL break
     if trade.get('carried_over'):
         if is_buy and high >= day_pdh and day_pdh > entry:
             reward = min(day_pdh - entry, 5.0 * risk)
@@ -223,29 +228,21 @@ def manage_open_trade(trade, candle, day_pdh, day_pdl):
         trade['pending_rr'] = new_lock
         trade['pending_sl'] = entry + new_lock * risk if is_buy else entry - new_lock * risk
         status = f"Profit_Locked_at_1:{new_lock:g}"
-        shown_rr = new_lock
     elif trade['locked_rr'] > 0:
         status = f"Running_Locked_at_1:{trade['locked_rr']:g}"
-        shown_rr = trade['locked_rr']
     else:
-        status = "Running"
-        shown_rr = 0.0
+        status = "Running_Waiting_MACD_Cross" if sl_hit else "Running"
 
-    return status, _pnl(entry, shown_rr * risk), trade
+    return status, _pnl(entry, trade.get('locked_rr', 0.0) * risk), trade
 
 
-# ======================= SINGLE CANDLE STEP (backtest + live dono yahi use karte hain) =======================
+# ======================= SINGLE CANDLE STEP =======================
 def step_candle(row, trade, daily, allow_entry=None):
-    """
-    Ek candle process karo. Return: (status, profit, trade, pdh, pdl)
-    allow_entry: optional function; False return kare to entry nahi li jaati (cap ke liye).
-    """
     pdh, pdl = levels_for(row['Date'], daily)
     have_levels = pdh is not None
     if not have_levels:
         pdh = pdl = float('nan')
 
-    # Trade kisi purane din ka hai to "carried over" mark karo
     if trade is not None and trade.get('entry_date') != str(row['Date']):
         trade['carried_over'] = True
 
@@ -271,7 +268,6 @@ def _record(row, status, profit, trade, pdh, pdl):
     entry = sl = float('nan')
     if trade is not None:
         entry = trade['entry_price']
-        # naya lock pending ho to wahi SL dikhao jo agli candle se lagega
         sl = trade['pending_sl'] if trade.get('pending_sl') is not None else trade['sl']
     return {
         'Timestamp': row['Timestamp'],
@@ -287,7 +283,6 @@ def _record(row, status, profit, trade, pdh, pdl):
 
 
 def run_rd_trading_system(df):
-    """Poore data par replay (backtest / --scan ke liye). Live alerts neeche scan_and_alert se aate hain."""
     df, daily = prepare(df)
     results = []
     trade = None
@@ -347,7 +342,7 @@ def fetch_candles_15m(pair, bars=CANDLE_BARS):
     ts = pd.to_datetime(d["time"], unit="ms", utc=True).dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
     out = pd.DataFrame({"Timestamp": ts, "Open": d["open"], "High": d["high"],
                         "Low": d["low"], "Close": d["close"], "Volume": d["volume"]})
-    return out.iloc[:-1].reset_index(drop=True)   # chalu (adhoori) candle hata do
+    return out.iloc[:-1].reset_index(drop=True)   
 
 
 def candle_volume_ok(df):
@@ -381,11 +376,10 @@ def scan_market():
     return pd.DataFrame(rows)
 
 
-# ======================= TELEGRAM ALERTS + AUTO RUN =======================
+# ======================= TELEGRAM ALERTS =======================
 SCRIPT_NAME = os.path.basename(__file__)
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(ROOT, "rd_trading_state.json")
-# Columns badal gaye hain (PDH/PDL/Entry/SL), isliye naya CSV naam taaki purani file ke saath header mix na ho
 SIGNALS_FILE = os.path.join(ROOT, "rd_trading_signals_v2.csv")
 
 ENTRY_STATUSES = {"Valid_Bullish_Breakout_BUY", "Valid_Bearish_Breakout_SELL"}
@@ -401,7 +395,7 @@ def telegram(message):
     token = os.getenv("TG_TOKEN") or os.getenv("BOT_TOKEN")
     chat = os.getenv("TG_CHAT_ID") or os.getenv("CHAT_ID")
     if not token or not chat:
-        print("Telegram not configured; add TG_TOKEN and TG_CHAT_ID secrets.")
+        print("Telegram not configured.")
         return False
     try:
         r = HTTP.post(f"https://api.telegram.org/bot{token}/sendMessage",
@@ -414,7 +408,6 @@ def telegram(message):
 
 
 def send_alert(message):
-    """True = bhej diya (ya Telegram configure nahi, sirf log). False = bhejna fail hua (agli cycle mein retry)."""
     if not _tg_configured():
         print("Telegram not configured; alert logged only:\n" + message)
         return True
@@ -428,9 +421,9 @@ def _load_state():
     except Exception:
         st = {}
     st.setdefault("sent", [])
-    st.setdefault("trades", {})     # pair -> open trade (entry, SL, risk, lock, ...)
-    st.setdefault("last_ts", {})    # pair -> last processed candle timestamp
-    st.pop("open", None)            # purana format (sirf pair list) - ab trades se kaam hota hai
+    st.setdefault("trades", {})     
+    st.setdefault("last_ts", {})    
+    st.pop("open", None)            
     return st
 
 
@@ -452,7 +445,7 @@ def _event_kind(status):
 
 def _format_alert(kind, pair, row, vol24):
     status = row["Status"]
-    icons = {"ENTRY": "🟢" if "BUY" in status else "🔴", "LOCK": "🔒", "EXIT": "🚪"}
+    icons = {"ENTRY": "🟢" if "BUY" in status else "🔴", "LOCK": "🔒", "EXIT": "❌"}
     lines = [
         f"{icons[kind]} [{SCRIPT_NAME}] {kind}",
         f"Coin: {pair}",
@@ -466,26 +459,22 @@ def _format_alert(kind, pair, row, vol24):
         risk_pct = abs(row['Entry'] - row['SL']) / row['Entry'] * 100
         lines.append(f"Entry: {row['Entry']} | SL: {row['SL']} (risk {risk_pct:.2f}%)")
     elif kind == "LOCK":
-        lines.append(f"New SL (agli candle se): {row['SL']}")
-        lines.append(f"Locked PnL (100 USDT @ 30X): {row['Locked_PnL_USDT']} USDT")
+        lines.append(f"New SL: {row['SL']}")
+        lines.append(f"Locked PnL: {row['Locked_PnL_USDT']} USDT")
     else:
-        lines.append(f"PnL (100 USDT @ 30X): {row['Locked_PnL_USDT']} USDT")
+        lines.append(f"PnL: {row['Locked_PnL_USDT']} USDT")
     lines.append("PAPER ONLY - no real orders")
     return "\n".join(lines)
 
 
 def live_events(df, trade, last_ts, allow_entry):
-    """
-    Sirf NAYI closed candles process karta hai (last_ts ke baad ki) aur open trade state se aage badhata hai.
-    Return: (events, trade, new_last_ts); events = [(kind, record), ...]
-    """
     if df.empty:
         return [], trade, last_ts
     df, daily = prepare(df)
     if last_ts:
         new = df[df['Timestamp'] > pd.Timestamp(last_ts)]
         if trade is None and len(new) > MAX_CATCHUP_BARS:
-            new = new.tail(MAX_CATCHUP_BARS)   # bahut purane signals par alert nahi
+            new = new.tail(MAX_CATCHUP_BARS)   
     else:
         new = df.tail(FIRST_RUN_BARS)
 
@@ -506,10 +495,7 @@ def scan_and_alert():
 
     liquid = fetch_liquid_pairs()
     liquid_map = {p["pair"]: p["volume_24h_usdt"] for p in liquid}
-    # Jinke trade khule hain unhe volume filter se bahar hone par bhi manage karte rahenge
     work = [p["pair"] for p in liquid] + [pr for pr in trades if pr not in liquid_map]
-    print(f"[{SCRIPT_NAME}] Ticker volume filter >= {MIN_24H_VOLUME_USDT:,.0f} USDT: {len(liquid)} coins pass, "
-          f"{len(trades)} open trade(s) in state")
 
     counters = {"entries": 0}
     new_rows = []
@@ -542,7 +528,7 @@ def scan_and_alert():
                 key = f"{pair}|{rec['Timestamp']}|{rec['Status']}"
                 if key not in sent:
                     if not send_alert(_format_alert(kind, pair, rec, vol24)):
-                        delivered = False   # Telegram fail: is coin ka state commit nahi, agli cycle mein retry
+                        delivered = False   
                         break
                     sent.add(key)
                     st["sent"].append(key)
@@ -553,7 +539,6 @@ def scan_and_alert():
             if not delivered:
                 continue
 
-            # State commit: open trade (entry/SL/lock) + last processed candle
             if new_trade is None:
                 trades.pop(pair, None)
             else:
@@ -569,8 +554,6 @@ def scan_and_alert():
     if new_rows:
         pd.DataFrame(new_rows).to_csv(SIGNALS_FILE, mode="a", header=not os.path.exists(SIGNALS_FILE), index=False)
     _save_state(st)
-    print(f"[{SCRIPT_NAME}] cycle done: {len(new_rows)} new event(s), {len(trades)} open trade(s), "
-          f"{candle_rejected} coin(s) rejected by 24h candle-volume check")
 
 
 if __name__ == "__main__":
@@ -582,7 +565,6 @@ if __name__ == "__main__":
         print(out.to_string(index=False) if not out.empty else "No data")
         sys.exit(0)
 
-    # Demo: 5 din ka synthetic 15m data (pichle din ka PDH/PDL ke liye kam se kam 2 din chahiye)
     n = 480
     dates = pd.date_range(start="2026-11-09 20:15", periods=n, freq="15min")
     np.random.seed(7)
@@ -601,6 +583,6 @@ if __name__ == "__main__":
     })
 
     res = run_rd_trading_system(test_df)
-    print("=== R&D PY (rd_trading.py) Execution Log (Prev-Day PDH/PDL + capped SL) ===")
-    shown = res[~res['Status'].isin(['No_Trade', 'Running'])]
+    print("=== R&D PY Execution Log (MACD Loss Exit Filter Added) ===")
+    shown = res[~res['Status'].isin(['No_Trade', 'Running', 'Running_Waiting_MACD_Cross'])]
     print(shown.head(30).to_string(index=False) if not shown.empty else "No signals in demo data")
