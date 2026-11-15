@@ -198,8 +198,11 @@ def manage_open_trade(trade, candle, day_pdh, day_pdl):
                 pass
             else:
                 # MACD ne confirm kar diya -> Exit
-                rr = -1.0
-                pnl = max(_pnl(entry, rr * risk), -MAX_LOSS_USDT)
+                # Realistic exit price: SL aur candle close mein se jo kharab ho (BUY: kam, SELL: zyada)
+                close_px = float(candle['Close'])
+                exit_px = min(sl, close_px) if is_buy else max(sl, close_px)
+                move = (exit_px - entry) if is_buy else (entry - exit_px)
+                pnl = max(_pnl(entry, move), -MAX_LOSS_USDT)
                 return "Stop_Loss_Hit_MACD_Confirmed", pnl, None
         else:
             # Locked profit par SL hit hua hai, normal exit
