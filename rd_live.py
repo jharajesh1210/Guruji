@@ -168,6 +168,7 @@ def load_state():
         st = {}
     st.setdefault("trades", {})
     st.setdefault("last_ts", {})
+    st.setdefault("done", {})
     return st
 
 
@@ -312,9 +313,10 @@ def scan_and_trade(cli=None):
                         and len(trades) < MAX_LIVE_OPEN and counters["opened"] < MAX_LIVE_OPEN)
 
             rdtrade = dict(t["rd"]) if t else None
+            done = set(st["done"].get(pair, []))   # sessions in which this coin already took a trade
             for _, row in new.iterrows():
                 ctx["fresh"] = row["Timestamp"] >= newest - pd.Timedelta(minutes=15 * (ENTRY_MAX_AGE_BARS - 1))
-                status, profit, rdtrade_next, pdh, pdl = rd.step_candle(row, rdtrade, daily, allow_entry)
+                status, profit, rdtrade_next, pdh, pdl = rd.step_candle(row, rdtrade, daily, allow_entry, done)
                 kind = rd._event_kind(status)
 
                 if t is None and kind == "ENTRY" and rdtrade_next is not None:
@@ -326,6 +328,7 @@ def scan_and_trade(cli=None):
                     if not plan:
                         tg(f"ENTRY SKIPPED {pair} {side.upper()}: {why}")
                         log_row(pair=pair, action="entry_skipped", side=side, note=why)
+                        done.discard(f"{row['Date']}|{row['Session']}")   # no order was placed, session slot stays free
                         rdtrade = None
                         continue
                     if LIVE:
@@ -334,6 +337,7 @@ def scan_and_trade(cli=None):
                         except Exception as e:
                             tg(f"ENTRY FAILED {pair} {side.upper()}: {e}\nsent qty={plan['qty']} lev={plan['lev']:g} price~{price} | instrument {inst}")
                             log_row(pair=pair, action="entry_failed", side=side, note=str(e)[:200])
+                            done.discard(f"{row['Date']}|{row['Session']}")
                             rdtrade = None
                             continue
                     else:
@@ -343,6 +347,7 @@ def scan_and_trade(cli=None):
                     trades[pair] = t
                     rdtrade = rdtrade_next
                     counters["opened"] += 1
+                    st["done"][pair] = sorted(done)[-12:]
                     save_state(st)
                     tg(f"ENTRY {side.upper()} {pair} | Session: {rdtrade_next.get('entry_session', row['Session'])}\nQty {plan['qty']} @ ~{fill} | {plan['lev']:g}x | margin {MARGIN_USDT} USDT\n"
                        f"Bot SL {rdtrade_next['sl']:.6g} (MACD rule) | Emergency stop {stop} ({plan['dist_pct']:.2f}% away)")
@@ -374,6 +379,7 @@ def scan_and_trade(cli=None):
                 else:
                     rdtrade = None
 
+            st["done"][pair] = sorted(done)[-12:]
             last_ts[pair] = str(newest)
         except Exception as e:
             print(f"skip {pair}: {e}")
