@@ -177,9 +177,10 @@ def save_state(st):
 
 
 def emergency_dist(price, risk, sl):
-    """Emergency-stop distance from the fill: 1.5R (max 2.5% of price, min R) and never nearer than the bot SL."""
-    base = max(min(EMERGENCY_R * risk, price * EMERGENCY_MAX_PCT / 100), risk)
-    return max(base, abs(price - sl) * 1.02) if sl else base
+    """Emergency (backstop) stop distance from the fill: EMERGENCY_MAX_PCT of price (2.5%), and never nearer than the bot SL.
+    It is a far disaster stop, so the MACD loss-exit rule keeps running the trade like the paper strategy."""
+    far = price * EMERGENCY_MAX_PCT / 100
+    return max(far, abs(price - sl) * 1.02) if sl else far
 
 
 def plan_order(side, price, risk, inst, lev_wanted, sl=None):
