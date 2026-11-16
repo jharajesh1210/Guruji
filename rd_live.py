@@ -328,7 +328,7 @@ def scan_and_trade(cli=None):
                         try:
                             pos_id, fill, stop = open_position(cli, pair, side, plan["qty"], plan["lev"], price, risk, rdtrade_next["sl"])
                         except Exception as e:
-                            tg(f"ENTRY FAILED {pair} {side.upper()}: {e}")
+                            tg(f"ENTRY FAILED {pair} {side.upper()}: {e}\nsent qty={plan['qty']} lev={plan['lev']:g} price~{price} | instrument {inst}")
                             log_row(pair=pair, action="entry_failed", side=side, note=str(e)[:200])
                             rdtrade = None
                             continue
