@@ -240,8 +240,7 @@ def manage_open_trade(trade, candle, day_pdh, day_pdl):
 
 
 # ======================= SINGLE CANDLE STEP =======================
-def step_candle(row, trade, daily, allow_entry=None, done=None):
-    # done: set of 'date|session' keys in which this coin already took a trade (one trade per coin per session)
+def step_candle(row, trade, daily, allow_entry=None):
     pdh, pdl = levels_for(row['Date'], daily)
     have_levels = pdh is not None
     if not have_levels:
@@ -259,13 +258,8 @@ def step_candle(row, trade, daily, allow_entry=None, done=None):
 
     status, new_trade = detect_signal(row, pdh, pdl)
     if new_trade is not None:
-        sess_key = f"{row['Date']}|{row['Session']}"
-        if done is not None and sess_key in done:
-            return "Entry_Skipped_Session_Done", 0.0, None, pdh, pdl
         if allow_entry is not None and not allow_entry():
             return "Entry_Skipped_Cap", 0.0, None, pdh, pdl
-        if done is not None:
-            done.add(sess_key)
         new_trade['entry_ts'] = str(row['Timestamp'])
         new_trade['entry_date'] = str(row['Date'])
         new_trade['entry_session'] = row['Session']
@@ -295,9 +289,8 @@ def run_rd_trading_system(df):
     df, daily = prepare(df)
     results = []
     trade = None
-    done = set()
     for _, row in df.iterrows():
-        status, profit, trade, pdh, pdl = step_candle(row, trade, daily, None, done)
+        status, profit, trade, pdh, pdl = step_candle(row, trade, daily)
         if status == "No_Prev_Day_Data":
             continue
         results.append(_record(row, status, profit, trade, pdh, pdl))
@@ -433,7 +426,6 @@ def _load_state():
     st.setdefault("sent", [])
     st.setdefault("trades", {})     
     st.setdefault("last_ts", {})    
-    st.setdefault("done", {})       
     st.pop("open", None)            
     return st
 
@@ -478,7 +470,7 @@ def _format_alert(kind, pair, row, vol24):
     return "\n".join(lines)
 
 
-def live_events(df, trade, last_ts, allow_entry, done=None):
+def live_events(df, trade, last_ts, allow_entry):
     if df.empty:
         return [], trade, last_ts
     df, daily = prepare(df)
@@ -491,7 +483,7 @@ def live_events(df, trade, last_ts, allow_entry, done=None):
 
     events = []
     for _, row in new.iterrows():
-        status, profit, trade, pdh, pdl = step_candle(row, trade, daily, allow_entry, done)
+        status, profit, trade, pdh, pdl = step_candle(row, trade, daily, allow_entry)
         kind = _event_kind(status)
         if kind:
             events.append((kind, _record(row, status, profit, trade, pdh, pdl)))
@@ -530,8 +522,7 @@ def scan_and_alert():
                         and len(trades) < MAX_OPEN_TRADES)
 
             trade = dict(trades[pair]) if has_trade else None
-            done = set(st["done"].get(pair, []))
-            events, new_trade, new_last = live_events(df, trade, last_ts.get(pair), allow_entry, done)
+            events, new_trade, new_last = live_events(df, trade, last_ts.get(pair), allow_entry)
 
             delivered = True
             entries_now = 0
@@ -551,7 +542,6 @@ def scan_and_alert():
             if not delivered:
                 continue
 
-            st["done"][pair] = sorted(done)[-12:]
             if new_trade is None:
                 trades.pop(pair, None)
             else:
