@@ -185,7 +185,11 @@ def emergency_dist(price, risk, sl):
 
 def plan_order(side, price, risk, inst, lev_wanted, sl=None):
     """Quantity, leverage and emergency-stop price. Returns (plan | None, reason)."""
-    max_lev = float(inst.get("max_leverage_long" if side == "buy" else "max_leverage_short", lev_wanted) or lev_wanted)
+    ml = inst.get("max_leverage_long" if side == "buy" else "max_leverage_short")
+    if not ml:   # some pairs (e.g. B-BLESS_USDT) give null here and only list tiers in dynamic_position_leverage_details
+        tiers = inst.get("dynamic_position_leverage_details") or {}
+        ml = max((float(k) for k in tiers), default=lev_wanted)
+    max_lev = float(ml)
     lev = min(lev_wanted, max_lev)
     qty_inc = inst.get("quantity_increment") or inst.get("min_quantity") or 0.001
     px_inc = inst.get("price_increment") or 0.0001
