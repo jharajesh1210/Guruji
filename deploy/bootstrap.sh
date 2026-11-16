@@ -24,8 +24,23 @@ python3 -m venv "$DIR/venv"
 "$DIR/venv/bin/pip" install -q requests pandas numpy
 
 echo "== 5/7 secrets (typing is hidden; paste and press Enter)"
-read -r -s -p "CoinDCX API key: " KEY </dev/tty; echo " (got ${#KEY} characters)"
-read -r -s -p "CoinDCX API secret: " SECRET </dev/tty; echo " (got ${#SECRET} characters)"
+clean() { printf %s "$1" | sed 's/\x1b\[20[01]~//g' | tr -cd 'A-Za-z0-9'; }
+ask() {   # $1 = label ; result in ASKED (paste junk removed, only letters/digits kept)
+  local v="" yn=""
+  while true; do
+    read -r -s -p "$1 (hidden, nothing shows while you paste) - then press Enter: " v </dev/tty; echo
+    v=$(clean "$v"); echo "  got ${#v} characters"
+    if [ "${#v}" -ge 16 ]; then ASKED="$v"; return; fi
+    read -r -p "  Too short - paste failed. Type 'y' to type it VISIBLY on screen (do not screenshot it), or Enter to paste again: " yn </dev/tty
+    if [ "$yn" = "y" ]; then
+      read -r -p "$1 (VISIBLE): " v </dev/tty
+      v=$(clean "$v"); echo "  got ${#v} characters"
+      if [ "${#v}" -ge 16 ]; then ASKED="$v"; return; fi
+    fi
+  done
+}
+ask "CoinDCX API key";    KEY="$ASKED"
+ask "CoinDCX API secret"; SECRET="$ASKED"
 read -r -p "Telegram bot token (Enter to skip): " TGT </dev/tty
 read -r -p "Telegram chat id (Enter to skip): " TGC </dev/tty
 if [ -z "$KEY" ] || [ -z "$SECRET" ]; then echo "API key/secret missing - stopping."; exit 1; fi
