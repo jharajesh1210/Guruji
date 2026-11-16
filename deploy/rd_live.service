@@ -1,0 +1,15 @@
+[Unit]
+Description=rd_live.py CoinDCX live runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rdlive
+WorkingDirectory=/home/rdlive/Guruji
+EnvironmentFile=/etc/rd_live.env
+ExecStart=/bin/bash /home/rdlive/Guruji/deploy/rd_live_run.sh
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

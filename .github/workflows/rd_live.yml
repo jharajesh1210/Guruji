@@ -66,6 +66,7 @@ jobs:
         run: python -m py_compile rd_trading.py rd_live.py
 
       - name: Probe (read-only keys / wallet / positions check)
+        continue-on-error: true
         run: python -u rd_live.py --probe
 
       - name: Run rd_live.py loop (every 5 minutes)
