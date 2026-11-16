@@ -373,13 +373,23 @@ def scan_and_trade(cli=None):
 
 def probe():
     print(f"LIVE_ENABLED={LIVE} (orders {'WILL' if LIVE else 'will NOT'} be placed)")
-    print("keys present:", bool(API_KEY and API_SECRET))
+    print(f"key length {len(API_KEY)} | secret length {len(API_SECRET)} | key == secret: {API_KEY == API_SECRET}")
     cli = Client(API_KEY, API_SECRET)
     inst = cli.instrument("B-BTC_USDT")
     print("instrument B-BTC_USDT:", {k: inst.get(k) for k in ("min_quantity", "quantity_increment", "price_increment",
                                                               "min_notional", "max_leverage_long", "max_leverage_short")})
-    print("wallets:", json.dumps(cli.wallets())[:600])
-    print("open positions:", [(p.get("pair"), p.get("active_pos")) for p in cli.positions()])
+    tests = [
+        ("spot balances   (POST, any valid key)", lambda: cli._signed("POST", "/exchange/v1/users/balances")),
+        ("futures wallets (GET)", cli.wallets),
+        ("futures positions (POST)", cli.positions),
+    ]
+    for name, fn in tests:
+        try:
+            r = fn()
+            size = len(r) if hasattr(r, "__len__") else "-"
+            print(f"OK    {name}: reply received ({type(r).__name__}, size {size})")
+        except Exception as e:
+            print(f"FAIL  {name}: {str(e)[:160]}")
 
 
 if __name__ == "__main__":
