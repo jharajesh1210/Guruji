@@ -333,7 +333,7 @@ def scan_and_trade(cli=None):
                     rdtrade = rdtrade_next
                     counters["opened"] += 1
                     save_state(st)
-                    tg(f"ENTRY {side.upper()} {pair}\nQty {plan['qty']} @ ~{fill} | {plan['lev']:g}x | margin {MARGIN_USDT} USDT\n"
+                    tg(f"ENTRY {side.upper()} {pair} | Session: {rdtrade_next.get('entry_session', row['Session'])}\nQty {plan['qty']} @ ~{fill} | {plan['lev']:g}x | margin {MARGIN_USDT} USDT\n"
                        f"Bot SL {rdtrade_next['sl']:.6g} (MACD rule) | Emergency stop {stop} ({plan['dist_pct']:.2f}% away)")
                     log_row(pair=pair, action="entry", side=side, qty=plan["qty"], price=fill, note=f"emergency {stop}")
                     continue
@@ -341,13 +341,13 @@ def scan_and_trade(cli=None):
                 if t is not None:
                     t["rd"] = rdtrade_next if rdtrade_next is not None else t["rd"]
                     if kind == "LOCK":
-                        tg(f"LOCK {pair}: {status} -> new bot SL {rdtrade_next['pending_sl']:.6g}")
+                        tg(f"LOCK {pair} ({t['rd'].get('entry_session', '?')} session): {status} -> new bot SL {rdtrade_next['pending_sl']:.6g}")
                         log_row(pair=pair, action="lock", note=status)
                     if kind == "EXIT":
                         try:
                             if LIVE:
                                 cli.exit_position(t["pos_id"])
-                            tg(f"EXIT {pair} {t['side'].upper()}: {status}\n(paper-equivalent PnL {profit:.2f} USDT at 3000 USDT size)")
+                            tg(f"EXIT {pair} {t['side'].upper()} | Session: {t['rd'].get('entry_session', '?')}\n{status}\n(paper-equivalent PnL {profit:.2f} USDT at 3000 USDT size)")
                             log_row(pair=pair, action="exit", side=t["side"], note=status)
                             trades.pop(pair, None)
                         except Exception as e:
