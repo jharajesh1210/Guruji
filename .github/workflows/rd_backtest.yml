@@ -1,0 +1,45 @@
+# One-off backtest of repeat-entry rules on rd_trading.py (manual start). Result is committed as rd_backtest_result.md
+name: rd_backtest repeat-entry rules
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of 15m history"
+        required: true
+        default: "60"
+permissions:
+  contents: write
+concurrency:
+  group: rd-backtest
+  cancel-in-progress: false
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install requests numpy pandas
+      - name: Run backtest
+        env:
+          BT_DAYS: ${{ github.event.inputs.days }}
+          BT_OUT: backtest_out
+        run: python -u rd_backtest_rules.py 2>&1 | tee backtest_log.txt
+      - name: Commit result
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cp backtest_out/backtest_results.md rd_backtest_result.md 2>/dev/null || tail -40 backtest_log.txt > rd_backtest_result.md
+          git add rd_backtest_result.md
+          git commit -m "rd_backtest result" || exit 0
+          for a in 1 2 3; do git pull --rebase --autostash origin main >/dev/null 2>&1 || true; git push origin HEAD:main && break; sleep 4; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backtest_out
+          path: backtest_out
