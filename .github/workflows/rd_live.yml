@@ -1,0 +1,128 @@
+# rd_live.py - CoinDCX futures LIVE runner (separate from the rd_trading.py paper scanner).
+# Manual start only (no schedule, no auto re-dispatch). Runs ~5.5 hours, one cycle every 5 minutes.
+# Default is DRY RUN (no orders). Real orders only when you start it with live = YES.
+name: rd_live.py CoinDCX Live
+
+on:
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "YES = place REAL orders. Anything else = dry run (alerts only)."
+        required: true
+        default: "NO"
+      probe_only:
+        description: "YES = only run the read-only key/wallet check, then stop."
+        required: true
+        default: "NO"
+      margin_usdt:
+        description: "Margin per trade in USDT"
+        required: true
+        default: "10"
+      max_open:
+        description: "Max trades open at the same time"
+        required: true
+        default: "2"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rd-live-runner
+  cancel-in-progress: false
+
+jobs:
+  rd-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      COINDCX_API_KEY: ${{ secrets.COINDCX_API_KEY }}
+      COINDCX_API_SECRET: ${{ secrets.COINDCX_API_SECRET }}
+      TG_TOKEN: ${{ secrets.TG_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+      LIVE_ENABLED: ${{ github.event.inputs.live }}
+      LIVE_MARGIN_USDT: ${{ github.event.inputs.margin_usdt }}
+      MAX_LIVE_OPEN: ${{ github.event.inputs.max_open }}
+      MIN_24H_VOLUME_USDT: "10000000"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests numpy pandas
+
+      - name: Compile
+        run: python -m py_compile rd_trading.py rd_live.py
+
+      - name: Probe (read-only keys / wallet / positions check)
+        run: python -u rd_live.py --probe
+
+      - name: Run rd_live.py loop (every 5 minutes)
+        if: github.event.inputs.probe_only != 'YES'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "LIVE_ENABLED=${LIVE_ENABLED} margin=${LIVE_MARGIN_USDT} max_open=${MAX_LIVE_OPEN}"
+
+          persist() {
+            for f in rd_live_state.json rd_live_log.csv; do
+              if [ -f "$f" ]; then git add "$f"; fi
+            done
+            if git diff --cached --quiet; then
+              return 0
+            fi
+            git commit -m "Update rd_live state" || return 0
+            for attempt in 1 2 3; do
+              git pull --rebase --autostash origin main >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then
+                return 0
+              fi
+              sleep $((attempt * 3))
+            done
+            echo "WARN: could not push rd_live state this cycle; will retry."
+            return 0
+          }
+
+          END=$(( $(date +%s) + 19800 ))
+          cycle=0
+          while [ "$(date +%s)" -lt "$END" ]; do
+            START=$(date +%s)
+            cycle=$((cycle + 1))
+            echo "=== rd_live cycle ${cycle} @ $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+            if ! timeout 280 python -u rd_live.py --alert; then
+              echo "WARN: rd_live cycle ${cycle} failed or timed out; continuing."
+            fi
+            persist
+            NEXT=$(( (START / 300 + 1) * 300 ))
+            NOW=$(date +%s)
+            if [ "$NEXT" -gt "$NOW" ]; then
+              sleep $((NEXT - NOW))
+            fi
+          done
+          echo "rd_live loop finished after ${cycle} cycles. Restart it manually if you want to continue."
+
+      - name: Warn if trades are still open when the runner stops
+        if: always() && github.event.inputs.probe_only != 'YES'
+        run: |
+          python - <<'PY'
+          import json, os
+          import rd_live
+          try:
+              t = json.load(open("rd_live_state.json")).get("trades", {})
+          except Exception:
+              t = {}
+          if t:
+              rd_live.tg("RUNNER STOPPED but these trades are still open: " + ", ".join(t) +
+                         ". Only the exchange emergency stop protects them now. Restart rd_live.yml or close them manually.")
+          PY
