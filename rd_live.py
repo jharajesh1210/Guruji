@@ -176,7 +176,13 @@ def save_state(st):
         json.dump(st, f, indent=2)
 
 
-def plan_order(side, price, risk, inst, lev_wanted):
+def emergency_dist(price, risk, sl):
+    """Emergency-stop distance from the fill: 1.5R (max 2.5% of price, min R) and never nearer than the bot SL."""
+    base = max(min(EMERGENCY_R * risk, price * EMERGENCY_MAX_PCT / 100), risk)
+    return max(base, abs(price - sl) * 1.02) if sl else base
+
+
+def plan_order(side, price, risk, inst, lev_wanted, sl=None):
     """Quantity, leverage and emergency-stop price. Returns (plan | None, reason)."""
     max_lev = float(inst.get("max_leverage_long" if side == "buy" else "max_leverage_short", lev_wanted) or lev_wanted)
     lev = min(lev_wanted, max_lev)
@@ -189,7 +195,7 @@ def plan_order(side, price, risk, inst, lev_wanted):
         return None, f"quantity {qty} below min_quantity {min_qty}"
     if qty * price < min_notional:
         return None, f"notional {qty * price:.2f} below min_notional {min_notional}"
-    dist = max(min(EMERGENCY_R * risk, price * EMERGENCY_MAX_PCT / 100), risk)
+    dist = emergency_dist(price, risk, sl)
     if dist / price * 100 > LIQ_SAFETY * 100.0 / lev:
         return None, f"emergency stop {dist / price * 100:.2f}% too close to liquidation at {lev:g}x"
     stop = price - dist if side == "buy" else price + dist
@@ -197,7 +203,7 @@ def plan_order(side, price, risk, inst, lev_wanted):
     return {"qty": qty, "lev": lev, "stop": stop, "dist_pct": dist / price * 100}, "ok"
 
 
-def open_position(cli, pair, side, qty, lev, stop_ref_price, risk):
+def open_position(cli, pair, side, qty, lev, stop_ref_price, risk, sl=None):
     """Place the market order, find the position, attach the emergency stop.
     Returns (position_id, fill_price, stop_price). Never leaves a position without the emergency stop."""
     cli.market_order(pair, side, qty, lev)
@@ -214,7 +220,7 @@ def open_position(cli, pair, side, qty, lev, stop_ref_price, risk):
         raise ApiError("order sent but no open position found - CHECK THE EXCHANGE MANUALLY")
     fill = float(pos.get("avg_price") or stop_ref_price)
     inst = cli.instrument(pair)
-    dist = max(min(EMERGENCY_R * risk, fill * EMERGENCY_MAX_PCT / 100), risk)
+    dist = min(emergency_dist(fill, risk, sl), fill * LIQ_SAFETY / lev)
     stop = fill - dist if side == "buy" else fill + dist
     stop = round_near(stop, inst.get("price_increment") or 0.0001)
     try:
@@ -311,7 +317,7 @@ def scan_and_trade(cli=None):
                     price = liquid_map[pair]["ltp"]
                     risk = rdtrade_next["risk"]
                     inst = cli.instrument(pair)
-                    plan, why = plan_order(side, price, risk, inst, LIVE_LEVERAGE)
+                    plan, why = plan_order(side, price, risk, inst, LIVE_LEVERAGE, rdtrade_next["sl"])
                     if not plan:
                         tg(f"ENTRY SKIPPED {pair} {side.upper()}: {why}")
                         log_row(pair=pair, action="entry_skipped", side=side, note=why)
@@ -319,7 +325,7 @@ def scan_and_trade(cli=None):
                         continue
                     if LIVE:
                         try:
-                            pos_id, fill, stop = open_position(cli, pair, side, plan["qty"], plan["lev"], price, risk)
+                            pos_id, fill, stop = open_position(cli, pair, side, plan["qty"], plan["lev"], price, risk, rdtrade_next["sl"])
                         except Exception as e:
                             tg(f"ENTRY FAILED {pair} {side.upper()}: {e}")
                             log_row(pair=pair, action="entry_failed", side=side, note=str(e)[:200])
