@@ -27,6 +27,9 @@ jobs:
       CHAT_ID: ${{ secrets.CHAT_ID }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MIN_24H_VOLUME_USDT: "10000000"
+      # Main paper now runs on the AWS server together with live (rd_live.py --combined).
+      # This GitHub copy is a backup only: no Telegram messages, so signals are not sent twice.
+      PAPER_TELEGRAM: "NO"
 
     steps:
       - name: Checkout repository

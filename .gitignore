@@ -1,0 +1,5 @@
+rd_trading_state_server.json
+rd_trading_signals_server.csv
+rd_live_state.json
+rd_live_log.csv
+__pycache__/

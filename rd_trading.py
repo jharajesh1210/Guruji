@@ -409,8 +409,10 @@ def scan_market():
 # ======================= TELEGRAM ALERTS =======================
 SCRIPT_NAME = os.path.basename(__file__)
 ROOT = os.path.dirname(os.path.abspath(__file__))
-STATE_FILE = os.path.join(ROOT, "rd_trading_state.json")
-SIGNALS_FILE = os.path.join(ROOT, "rd_trading_signals_v2.csv")
+STATE_FILE = os.getenv("RD_STATE_FILE") or os.path.join(ROOT, "rd_trading_state.json")
+SIGNALS_FILE = os.getenv("RD_SIGNALS_FILE") or os.path.join(ROOT, "rd_trading_signals_v2.csv")
+STATE_SEED_FILE = os.path.join(ROOT, "rd_trading_state.json")   # first run of a new state file starts from this
+PAPER_TELEGRAM = os.getenv("PAPER_TELEGRAM", "YES").strip().upper() != "NO"
 
 ENTRY_STATUSES = {"Valid_Bullish_Breakout_BUY", "Valid_Bearish_Breakout_SELL"}
 EXIT_PREFIXES = ("Stop_Loss_Hit", "SL_Hit_Exit_Locked", "Target_1:5", "Next_Day_PDH", "Next_Day_PDL")
@@ -438,6 +440,9 @@ def telegram(message):
 
 
 def send_alert(message):
+    if not PAPER_TELEGRAM:
+        print("PAPER_TELEGRAM=NO; alert not sent:\n" + message)
+        return True
     if not _tg_configured():
         print("Telegram not configured; alert logged only:\n" + message)
         return True
@@ -445,8 +450,9 @@ def send_alert(message):
 
 
 def _load_state():
+    path = STATE_FILE if os.path.exists(STATE_FILE) else STATE_SEED_FILE
     try:
-        with open(STATE_FILE, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             st = json.load(f)
     except Exception:
         st = {}
@@ -518,7 +524,9 @@ def live_events(df, trade, last_ts, allow_entry, blocks=None):
     return events, trade, str(df['Timestamp'].iloc[-1])
 
 
-def scan_and_alert():
+def scan_and_alert(after_pair=None):
+    """after_pair(pair, open_trades): optional hook called right after each coin is processed
+    (rd_live.py uses it to copy a paper entry to live within seconds)."""
     st = _load_state()
     sent = set(st["sent"])
     trades = st["trades"]
@@ -581,6 +589,12 @@ def scan_and_alert():
             new_rows.extend(rows_now)
         except Exception as e:
             print(f"skip {pair}: {e}")
+        finally:
+            if after_pair is not None:
+                try:
+                    after_pair(pair, trades)
+                except Exception as e:
+                    print(f"after_pair {pair}: {e}")
         _time.sleep(0.2)
 
     if new_rows:

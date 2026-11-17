@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs rd_live.py one scan every 5 minutes + fast lock watch every minute (aligned to :00 :05 :10 ...). Keep it running with systemd.
+# Runs paper (rd_trading.py) + live (rd_live.py) together every 5 minutes + fast lock watch every minute (aligned to :00 :05 :10 ...). Keep it running with systemd.
 set -u
 cd "$(dirname "$0")/.."
 exec 9>/tmp/rd_live.lock
@@ -7,9 +7,9 @@ flock -n 9 || { echo "rd_live is already running"; exit 1; }
 while true; do
   START=$(date +%s)
   echo "=== rd_live cycle @ $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-  timeout 280 ./venv/bin/python -u rd_live.py --alert || echo "WARN: cycle failed or timed out; continuing."
-  # scans run at :02:30, :07:30 ... so the paper scanner (GitHub, :00/:05) has pushed its state first
-  NEXT=$(( ((START - 150) / 300 + 1) * 300 + 150 ))
+  timeout 280 ./venv/bin/python -u rd_live.py --combined || echo "WARN: cycle failed or timed out; continuing."
+  # paper + live scan together at :00:20, :05:20 ... (20 s after the candle closes)
+  NEXT=$(( ((START - 20) / 300 + 1) * 300 + 20 ))
   # fast profit-lock watcher every minute until the next scan
   while [ $(( $(date +%s) + 60 )) -lt "$NEXT" ]; do
     W=$(date +%s)

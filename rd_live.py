@@ -315,7 +315,9 @@ def open_position(cli, pair, side, qty, lev, stop_ref_price, risk, sl=None):
 
 
 # ----------------------------------------------------------------- one scan cycle
-def scan_and_trade(cli=None):
+def live_cycle(cli=None, paper_local=None):
+    """Prepare one live scan. Returns (do_pair, finish). do_pair(pair, paper_trades) handles one coin;
+    finish() handles the coins not visited yet and saves the state."""
     cli = cli or Client(API_KEY, API_SECRET)
     st = load_state()
     trades, last_ts = st["trades"], st["last_ts"]
@@ -379,20 +381,30 @@ def scan_and_trade(cli=None):
                 except Exception as e:
                     tg(f"LOCK STOP RETRY FAILED {pair}: {str(e)[:150]}")
 
-    paper = load_paper_trades() if MIRROR_PAPER else {}
+    paper = dict(paper_local) if paper_local is not None else (load_paper_trades() if MIRROR_PAPER else {})
     if MIRROR_PAPER and paper is None:
         print("paper state not readable from GitHub -> no new live entries this cycle")
         paper = {}
 
     counters = {"opened": 0}
-    for pair in work:
+    done = set()
+
+    def do_pair(pair, paper_now=None):
+        if paper_now is not None:
+            paper.clear()
+            paper.update(paper_now)
+        if pair in done:
+            return
+        done.add(pair)
         t = trades.get(pair)
+        if t is None and pair not in liquid_map and pair not in work:
+            return
         if t and t.get("pending_exit"):
-            continue
+            return
         try:
             df = rd.fetch_candles_15m(pair)
             if df.empty:
-                continue
+                return
             df, daily = rd.prepare(df)
             newest = df["Timestamp"].iloc[-1]
             if last_ts.get(pair):
@@ -413,7 +425,7 @@ def scan_and_trade(cli=None):
                 ok, _ = rd.candle_volume_ok(df)
                 if not ok or pair not in liquid_map:
                     last_ts[pair] = str(newest)
-                    continue
+                    return
 
             ctx = {"fresh": False, "ts": None}
 
@@ -528,7 +540,28 @@ def scan_and_trade(cli=None):
             print(f"skip {pair}: {e}")
         _time.sleep(0.2)
 
-    save_state(st)
+
+    def finish():
+        for pair in work:
+            do_pair(pair)
+        save_state(st)
+
+    return do_pair, finish
+
+
+def scan_and_trade(cli=None):
+    do_pair, finish = live_cycle(cli)
+    finish()
+
+
+def paper_then_live(cli=None):
+    """Paper scanner and live runner in ONE pass on this server: each coin is scanned by paper first and,
+    if paper enters, live copies it a few seconds later. Paper state lives in RD_STATE_FILE (server copy)."""
+    rd.STATE_FILE = os.getenv("RD_STATE_FILE") or os.path.join(ROOT, "rd_trading_state_server.json")
+    rd.SIGNALS_FILE = os.getenv("RD_SIGNALS_FILE") or os.path.join(ROOT, "rd_trading_signals_server.csv")
+    do_pair, finish = live_cycle(cli, paper_local={})
+    rd.scan_and_alert(after_pair=lambda pair, paper_trades: do_pair(pair, paper_trades))
+    finish()
 
 
 # ----------------------------------------------------------------- fast lock watcher (every minute)
@@ -623,6 +656,8 @@ if __name__ == "__main__":
         probe()
     elif "--alert" in sys.argv:
         scan_and_trade()
+    elif "--combined" in sys.argv:
+        paper_then_live()
     elif "--watch" in sys.argv:
         watch_locks()
     else:
