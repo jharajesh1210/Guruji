@@ -240,7 +240,22 @@ def manage_open_trade(trade, candle, day_pdh, day_pdl):
 
 
 # ======================= SINGLE CANDLE STEP =======================
-def step_candle(row, trade, daily, allow_entry=None):
+def session_key(date, session):
+    """One trading session instance, e.g. '2026-11-17|NY' (NY after midnight belongs to the previous Date)."""
+    return f"{date}|{session}"
+
+
+def session_key_now():
+    now = pd.Timestamp.utcnow().tz_convert("Asia/Kolkata").tz_localize(None)
+    sess = assign_session(now)
+    day = (now - timedelta(days=1)).date() if (sess == 'NY' and now.time() < time(5, 30)) else now.date()
+    return session_key(day, sess)
+
+
+def step_candle(row, trade, daily, allow_entry=None, blocks=None):
+    """blocks (optional, per pair): {"BUY": session_key, "SELL": session_key}.
+    Rule: after a PROFIT exit, the same coin is not entered again in the same direction
+    until that session (Asian / London / NY) ends."""
     pdh, pdl = levels_for(row['Date'], daily)
     have_levels = pdh is not None
     if not have_levels:
@@ -250,7 +265,10 @@ def step_candle(row, trade, daily, allow_entry=None):
         trade['carried_over'] = True
 
     if trade is not None:
+        direction = trade['direction']
         status, profit, trade = manage_open_trade(trade, row, pdh, pdl)
+        if trade is None and profit > 0 and blocks is not None:
+            blocks[direction] = session_key(row['Date'], row['Session'])
         return status, profit, trade, pdh, pdl
 
     if not have_levels:
@@ -258,6 +276,8 @@ def step_candle(row, trade, daily, allow_entry=None):
 
     status, new_trade = detect_signal(row, pdh, pdl)
     if new_trade is not None:
+        if blocks is not None and blocks.get(new_trade['direction']) == session_key(row['Date'], row['Session']):
+            return "Entry_Skipped_Profit_Exit_Same_Session", 0.0, None, pdh, pdl
         if allow_entry is not None and not allow_entry():
             return "Entry_Skipped_Cap", 0.0, None, pdh, pdl
         new_trade['entry_ts'] = str(row['Timestamp'])
@@ -289,8 +309,9 @@ def run_rd_trading_system(df):
     df, daily = prepare(df)
     results = []
     trade = None
+    blocks = {}
     for _, row in df.iterrows():
-        status, profit, trade, pdh, pdl = step_candle(row, trade, daily)
+        status, profit, trade, pdh, pdl = step_candle(row, trade, daily, blocks=blocks)
         if status == "No_Prev_Day_Data":
             continue
         results.append(_record(row, status, profit, trade, pdh, pdl))
@@ -426,6 +447,7 @@ def _load_state():
     st.setdefault("sent", [])
     st.setdefault("trades", {})     
     st.setdefault("last_ts", {})    
+    st.setdefault("profit_block", {})
     st.pop("open", None)            
     return st
 
@@ -470,7 +492,7 @@ def _format_alert(kind, pair, row, vol24):
     return "\n".join(lines)
 
 
-def live_events(df, trade, last_ts, allow_entry):
+def live_events(df, trade, last_ts, allow_entry, blocks=None):
     if df.empty:
         return [], trade, last_ts
     df, daily = prepare(df)
@@ -483,7 +505,7 @@ def live_events(df, trade, last_ts, allow_entry):
 
     events = []
     for _, row in new.iterrows():
-        status, profit, trade, pdh, pdl = step_candle(row, trade, daily, allow_entry)
+        status, profit, trade, pdh, pdl = step_candle(row, trade, daily, allow_entry, blocks)
         kind = _event_kind(status)
         if kind:
             events.append((kind, _record(row, status, profit, trade, pdh, pdl)))
@@ -522,7 +544,8 @@ def scan_and_alert():
                         and len(trades) < MAX_OPEN_TRADES)
 
             trade = dict(trades[pair]) if has_trade else None
-            events, new_trade, new_last = live_events(df, trade, last_ts.get(pair), allow_entry)
+            events, new_trade, new_last = live_events(df, trade, last_ts.get(pair), allow_entry,
+                                                      st["profit_block"].setdefault(pair, {}))
 
             delivered = True
             entries_now = 0

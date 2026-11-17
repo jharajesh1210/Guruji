@@ -12,6 +12,8 @@ rd_live.py - CoinDCX futures LIVE runner for the rd_trading.py strategy.
                     If it cannot be placed, the position is closed immediately.
 * ENTRY GUARD     : skips the entry if live price is already > ENTRY_MAX_SLIP_R (0.3R) past the paper entry.
 * PROFIT LOCK     : on every paper lock (1:2/1:3/1:4) the exchange stop is moved to the locked SL.
+* PROFIT BLOCK    : after a profit exit (incl. locked stop / manual close in profit) the same coin is not
+                    entered again in the same direction until that session (Asian/London/NY) ends.
 * SAFE BY DEFAULT : unless LIVE_ENABLED=YES this is a DRY RUN (no orders, only alerts).
 
 Usage:
@@ -176,6 +178,7 @@ def load_state():
         st = {}
     st.setdefault("trades", {})
     st.setdefault("last_ts", {})
+    st.setdefault("profit_block", {})
     return st
 
 
@@ -306,8 +309,18 @@ def scan_and_trade(cli=None):
     if LIVE:
         for pair in list(trades):
             if trades[pair].get("pos_id") and pair not in exch_open and not trades[pair].get("pending_exit"):
-                why = (f"locked-profit stop {trades[pair]['lock_on_exchange']}" if trades[pair].get("lock_on_exchange")
+                tr = trades[pair]
+                why = (f"locked-profit stop {tr['lock_on_exchange']}" if tr.get("lock_on_exchange")
                        else "emergency stop or manual")
+                # profit exit (locked, or closed by hand while in profit) -> same coin, same direction blocked this session
+                rdt = tr.get("rd") or {}
+                ltp = fresh_ltp(pair)
+                in_profit = rdt.get("locked_rr", 0) > 0 or rdt.get("pending_rr", 0) > 0 or (
+                    ltp is not None and rdt.get("entry_price") and
+                    ((ltp > rdt["entry_price"]) if rdt.get("direction") == "BUY" else (ltp < rdt["entry_price"])))
+                if in_profit and rdt.get("direction"):
+                    st["profit_block"].setdefault(pair, {})[rdt["direction"]] = rd.session_key_now()
+                    why += f"; in profit -> no new {rdt['direction']} on {pair} until this session ends"
                 tg(f"CLOSED ON EXCHANGE ({why}): {pair}. Removed from bot state.")
                 log_row(pair=pair, action="closed_on_exchange", note=why)
                 trades.pop(pair)
@@ -336,6 +349,7 @@ def scan_and_trade(cli=None):
                     tg(f"LOCK STOP retry {pair}: {note}")
                     log_row(pair=pair, action="lock_retry", note=note)
                     if "closed at market" in note:
+                        st["profit_block"].setdefault(pair, {})[t["rd"]["direction"]] = rd.session_key_now()
                         trades.pop(pair)
                 except Exception as e:
                     tg(f"LOCK STOP RETRY FAILED {pair}: {str(e)[:150]}")
@@ -373,7 +387,8 @@ def scan_and_trade(cli=None):
             rdtrade = dict(t["rd"]) if t else None
             for _, row in new.iterrows():
                 ctx["fresh"] = row["Timestamp"] >= newest - pd.Timedelta(minutes=15 * (ENTRY_MAX_AGE_BARS - 1))
-                status, profit, rdtrade_next, pdh, pdl = rd.step_candle(row, rdtrade, daily, allow_entry)
+                status, profit, rdtrade_next, pdh, pdl = rd.step_candle(row, rdtrade, daily, allow_entry,
+                                                                           st["profit_block"].setdefault(pair, {}))
                 kind = rd._event_kind(status)
 
                 if t is None and kind == "ENTRY" and rdtrade_next is not None:
@@ -430,6 +445,7 @@ def scan_and_trade(cli=None):
                                 if "closed at market" in note:
                                     tg(f"LOCK {pair}: {status} -> {note}")
                                     log_row(pair=pair, action="lock_exit", note=f"{status}; {note}")
+                                    st["profit_block"].setdefault(pair, {})[t["rd"]["direction"]] = rd.session_key(row["Date"], row["Session"])
                                     trades.pop(pair, None)
                                     t = None
                                     break
