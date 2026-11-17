@@ -16,6 +16,8 @@ rd_live.py - CoinDCX futures LIVE runner for the rd_trading.py strategy.
                     entered again in the same direction until that session (Asian/London/NY) ends.
 * FAST LOCK       : --watch (every minute between scans) applies 1:2/1:3/1:4 locks the moment price touches
                     them and closes at 1:5, instead of waiting for the 15m candle to close.
+* PAPER MIRROR    : live enters ONLY trades the paper scanner took (same pair / candle / direction),
+                    read from rd_trading_state.json on GitHub each scan (MIRROR_PAPER=YES).
 * SAFE BY DEFAULT : unless LIVE_ENABLED=YES this is a DRY RUN (no orders, only alerts).
 
 Usage:
@@ -56,6 +58,13 @@ ENTRY_MAX_SLIP_R = float(os.getenv("ENTRY_MAX_SLIP_R", "0.3"))
 # Profit lock on the exchange: when paper locks 1:2 / 1:3 / 1:4, move the exchange stop to that locked level
 # (instead of only the far emergency stop) so the locked profit is protected between bot cycles.
 LOCK_ON_EXCHANGE = os.getenv("LOCK_ON_EXCHANGE", "YES").strip().upper() == "YES"
+# Live = copy of paper: a live entry is taken only if the paper scanner (GitHub) took the same trade
+# (same pair, same entry candle, same direction). Paper state is read from GitHub every scan.
+MIRROR_PAPER = os.getenv("MIRROR_PAPER", "YES").strip().upper() == "YES"
+PAPER_STATE_URLS = (
+    "https://api.github.com/repos/jharajesh1210/Guruji/contents/rd_trading_state.json?ref=main",
+    "https://raw.githubusercontent.com/jharajesh1210/Guruji/main/rd_trading_state.json",
+)
 LIQ_SAFETY = 0.8   # emergency stop must be inside 80% of the (1/leverage) liquidation distance
 
 API_KEY = os.getenv("COINDCX_API_KEY", "")
@@ -181,6 +190,7 @@ def load_state():
     st.setdefault("trades", {})
     st.setdefault("last_ts", {})
     st.setdefault("profit_block", {})
+    st.setdefault("mirrored", {})     # pair -> paper entry_ts already copied (never copy the same paper trade twice)
     return st
 
 
@@ -223,6 +233,19 @@ def move_stop_to_lock(cli, pair, t, lock_sl):
     t["lock_on_exchange"] = stop
     t.pop("lock_stop_retry", None)
     return f"exchange stop moved to lock {stop}"
+
+
+def load_paper_trades():
+    """Open trades of the paper scanner (rd_trading_state.json on GitHub main). None if unavailable."""
+    for url in PAPER_STATE_URLS:
+        try:
+            r = HTTP.get(url, headers={"Accept": "application/vnd.github.raw", "Cache-Control": "no-cache"},
+                         params={"t": int(_time.time())} if "raw.githubusercontent" in url else None, timeout=20)
+            if r.status_code == 200:
+                return (r.json() or {}).get("trades", {})
+        except Exception:
+            pass
+    return None
 
 
 def emergency_dist(price, risk, sl):
@@ -356,6 +379,11 @@ def scan_and_trade(cli=None):
                 except Exception as e:
                     tg(f"LOCK STOP RETRY FAILED {pair}: {str(e)[:150]}")
 
+    paper = load_paper_trades() if MIRROR_PAPER else {}
+    if MIRROR_PAPER and paper is None:
+        print("paper state not readable from GitHub -> no new live entries this cycle")
+        paper = {}
+
     counters = {"opened": 0}
     for pair in work:
         t = trades.get(pair)
@@ -374,26 +402,45 @@ def scan_and_trade(cli=None):
             else:
                 new = df.tail(rd.FIRST_RUN_BARS)
 
+            # paper took a trade here that live has not copied yet -> look at its entry candle again
+            pt = paper.get(pair) if MIRROR_PAPER else None
+            if t is None and pt and st["mirrored"].get(pair) != str(pt.get("entry_ts")):
+                ets = pd.Timestamp(pt["entry_ts"])
+                if ets >= newest - pd.Timedelta(minutes=15 * (ENTRY_MAX_AGE_BARS - 1)):
+                    new = df[df["Timestamp"] >= ets]
+
             if t is None:
                 ok, _ = rd.candle_volume_ok(df)
                 if not ok or pair not in liquid_map:
                     last_ts[pair] = str(newest)
                     continue
 
-            ctx = {"fresh": False}
+            ctx = {"fresh": False, "ts": None}
+
+            def in_paper():
+                if not MIRROR_PAPER:
+                    return True
+                pt = paper.get(pair)
+                return (bool(pt) and str(pt.get("entry_ts")) == str(ctx["ts"])
+                        and st["mirrored"].get(pair) != str(pt.get("entry_ts")))
 
             def allow_entry():
-                return (ctx["fresh"] and pair in liquid_map
+                return (ctx["fresh"] and pair in liquid_map and in_paper()
                         and len(trades) < MAX_LIVE_OPEN and counters["opened"] < MAX_LIVE_OPEN)
 
             rdtrade = dict(t["rd"]) if t else None
             for _, row in new.iterrows():
                 ctx["fresh"] = row["Timestamp"] >= newest - pd.Timedelta(minutes=15 * (ENTRY_MAX_AGE_BARS - 1))
+                ctx["ts"] = row["Timestamp"]
                 status, profit, rdtrade_next, pdh, pdl = rd.step_candle(row, rdtrade, daily, allow_entry,
                                                                            st["profit_block"].setdefault(pair, {}))
                 kind = rd._event_kind(status)
 
                 if t is None and kind == "ENTRY" and rdtrade_next is not None:
+                    if MIRROR_PAPER and paper.get(pair, {}).get("direction") != rdtrade_next["direction"]:
+                        rdtrade = None
+                        continue
+                    st["mirrored"][pair] = str(row["Timestamp"])
                     side = "buy" if rdtrade_next["direction"] == "BUY" else "sell"
                     price = fresh_ltp(pair) or liquid_map[pair]["ltp"]
                     risk = rdtrade_next["risk"]

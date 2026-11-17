@@ -8,7 +8,8 @@ while true; do
   START=$(date +%s)
   echo "=== rd_live cycle @ $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
   timeout 280 ./venv/bin/python -u rd_live.py --alert || echo "WARN: cycle failed or timed out; continuing."
-  NEXT=$(( (START / 300 + 1) * 300 ))
+  # scans run at :02:30, :07:30 ... so the paper scanner (GitHub, :00/:05) has pushed its state first
+  NEXT=$(( ((START - 150) / 300 + 1) * 300 + 150 ))
   # fast profit-lock watcher every minute until the next scan
   while [ $(( $(date +%s) + 60 )) -lt "$NEXT" ]; do
     W=$(date +%s)
