@@ -717,22 +717,10 @@
     "B-PUMP_USDT|2026-11-17 06:30:00|Valid_Bearish_Breakout_SELL",
     "B-COPPER_USDT|2026-11-17 06:45:00|Valid_Bearish_Breakout_SELL",
     "B-CL_USDT|2026-11-17 07:00:00|Valid_Bearish_Breakout_SELL",
-    "B-COPPER_USDT|2026-11-17 07:00:00|Stop_Loss_Hit_MACD_Confirmed"
+    "B-COPPER_USDT|2026-11-17 07:00:00|Stop_Loss_Hit_MACD_Confirmed",
+    "B-NATGAS_USDT|2026-11-17 07:00:00|Next_Day_PDL_Break_Exit_1:1.47"
   ],
   "trades": {
-    "B-NATGAS_USDT": {
-      "direction": "SELL",
-      "entry_price": 3.509,
-      "sl": 3.524,
-      "risk": 0.015000000000000124,
-      "locked_rr": 0.0,
-      "pending_sl": null,
-      "pending_rr": 0.0,
-      "carried_over": true,
-      "entry_ts": "2026-11-17 04:30:00",
-      "entry_date": "2026-11-16",
-      "entry_session": "NY"
-    },
     "B-PENGU_USDT": {
       "direction": "SELL",
       "entry_price": 0.004787,
@@ -774,8 +762,8 @@
     }
   },
   "last_ts": {
-    "B-BTC_USDT": "2026-11-17 06:45:00",
-    "B-ETH_USDT": "2026-11-17 06:45:00",
+    "B-BTC_USDT": "2026-11-17 07:00:00",
+    "B-ETH_USDT": "2026-11-17 07:00:00",
     "B-SOL_USDT": "2026-11-17 07:00:00",
     "B-ZEC_USDT": "2026-11-17 07:00:00",
     "B-AKE_USDT": "2026-11-17 07:00:00",
@@ -841,7 +829,7 @@
     "B-BMT_USDT": "2026-11-16 03:00:00",
     "B-ICP_USDT": "2026-11-17 07:00:00",
     "B-NIGHT_USDT": "2026-11-17 07:00:00",
-    "B-NATGAS_USDT": "2026-11-17 06:45:00",
+    "B-NATGAS_USDT": "2026-11-17 07:00:00",
     "B-PONS_USDT": "2026-11-17 07:00:00",
     "B-KGEN_USDT": "2026-11-15 20:15:00",
     "B-1000SHIB_USDT": "2026-11-17 07:00:00",
@@ -922,7 +910,7 @@
     "B-STX_USDT": "2026-11-16 01:45:00",
     "B-SKYAI_USDT": "2026-11-16 14:15:00",
     "B-ALLO_USDT": "2026-11-16 05:15:00",
-    "B-SKY_USDT": "2026-11-17 06:45:00",
+    "B-SKY_USDT": "2026-11-17 07:00:00",
     "B-GPS_USDT": "2026-11-16 01:30:00",
     "B-JELLYJELLY_USDT": "2026-11-16 16:30:00",
     "B-BEAT_USDT": "2026-11-15 16:45:00",
