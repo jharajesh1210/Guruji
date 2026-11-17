@@ -10,6 +10,8 @@ rd_live.py - CoinDCX futures LIVE runner for the rd_trading.py strategy.
 * EMERGENCY STOP  : a far stop_market order placed on the exchange right after entry
                     (entry -/+ min(1.5R, 2.5% of price), never nearer than the SL).
                     If it cannot be placed, the position is closed immediately.
+* ENTRY GUARD     : skips the entry if live price is already > ENTRY_MAX_SLIP_R (0.3R) past the paper entry.
+* PROFIT LOCK     : on every paper lock (1:2/1:3/1:4) the exchange stop is moved to the locked SL.
 * SAFE BY DEFAULT : unless LIVE_ENABLED=YES this is a DRY RUN (no orders, only alerts).
 
 Usage:
@@ -44,6 +46,12 @@ MAX_LIVE_OPEN = int(os.getenv("MAX_LIVE_OPEN", "2"))
 EMERGENCY_R = float(os.getenv("EMERGENCY_R", "1.5"))
 EMERGENCY_MAX_PCT = float(os.getenv("EMERGENCY_MAX_PCT", "2.5"))
 ENTRY_MAX_AGE_BARS = int(os.getenv("ENTRY_MAX_AGE_BARS", "2"))   # only act on entries from the newest N candles
+# Entry chase guard: paper enters at the breakout candle close. If the live price has already run more than
+# ENTRY_MAX_SLIP_R x risk past that close (against us), skip - a late, worse fill makes the 1:2 lock unreachable.
+ENTRY_MAX_SLIP_R = float(os.getenv("ENTRY_MAX_SLIP_R", "0.3"))
+# Profit lock on the exchange: when paper locks 1:2 / 1:3 / 1:4, move the exchange stop to that locked level
+# (instead of only the far emergency stop) so the locked profit is protected between bot cycles.
+LOCK_ON_EXCHANGE = os.getenv("LOCK_ON_EXCHANGE", "YES").strip().upper() == "YES"
 LIQ_SAFETY = 0.8   # emergency stop must be inside 80% of the (1/leverage) liquidation distance
 
 API_KEY = os.getenv("COINDCX_API_KEY", "")
@@ -176,6 +184,42 @@ def save_state(st):
         json.dump(st, f, indent=2)
 
 
+def fresh_ltp(pair):
+    """Latest futures price for one pair (public ticker), None if unavailable."""
+    try:
+        q = (rd.http_json(rd.PRICE_URL).get("prices") or {}).get(pair) or {}
+        px = float(q.get("ls") or 0)
+        return px if px > 0 else None
+    except Exception:
+        return None
+
+
+def entry_slip_r(side, paper_entry, price, risk):
+    """How far (in R) the live price is past the paper entry, against us (+ = worse)."""
+    if not risk:
+        return 0.0
+    move = (price - paper_entry) if side == "buy" else (paper_entry - price)
+    return move / risk
+
+
+def move_stop_to_lock(cli, pair, t, lock_sl):
+    """Put the locked-profit SL on the exchange. If price is already through it, close now.
+    Returns a short status text."""
+    side = t["side"]
+    inst = cli.instrument(pair)
+    stop = round_near(lock_sl, inst.get("price_increment") or 0.0001)
+    ltp = fresh_ltp(pair)
+    through = ltp is not None and ((side == "buy" and ltp <= stop) or (side == "sell" and ltp >= stop))
+    if through:
+        cli.exit_position(t["pos_id"])
+        return f"price {ltp} already past lock {stop} -> closed at market"
+    cli.stop_loss(t["pos_id"], stop)
+    t["emergency_stop"] = stop
+    t["lock_on_exchange"] = stop
+    t.pop("lock_stop_retry", None)
+    return f"exchange stop moved to lock {stop}"
+
+
 def emergency_dist(price, risk, sl):
     """Emergency (backstop) stop distance from the fill: EMERGENCY_MAX_PCT of price (2.5%), and never nearer than the bot SL.
     It is a far disaster stop, so the MACD loss-exit rule keeps running the trade like the paper strategy."""
@@ -262,8 +306,10 @@ def scan_and_trade(cli=None):
     if LIVE:
         for pair in list(trades):
             if trades[pair].get("pos_id") and pair not in exch_open and not trades[pair].get("pending_exit"):
-                tg(f"CLOSED ON EXCHANGE (emergency stop or manual): {pair}. Removed from bot state.")
-                log_row(pair=pair, action="closed_on_exchange", note="emergency stop / manual")
+                why = (f"locked-profit stop {trades[pair]['lock_on_exchange']}" if trades[pair].get("lock_on_exchange")
+                       else "emergency stop or manual")
+                tg(f"CLOSED ON EXCHANGE ({why}): {pair}. Removed from bot state.")
+                log_row(pair=pair, action="closed_on_exchange", note=why)
                 trades.pop(pair)
         for pair in exch_open:
             if pair not in trades:
@@ -280,6 +326,19 @@ def scan_and_trade(cli=None):
                 trades.pop(pair)
             except Exception as e:
                 tg(f"EXIT RETRY FAILED {pair}: {e}  -> CLOSE IT MANUALLY IF IT KEEPS FAILING")
+
+    # 3) retry exchange lock stops that failed earlier
+    if LIVE and LOCK_ON_EXCHANGE:
+        for pair, t in list(trades.items()):
+            if t.get("lock_stop_retry") and not t.get("pending_exit"):
+                try:
+                    note = move_stop_to_lock(cli, pair, t, t["lock_stop_retry"])
+                    tg(f"LOCK STOP retry {pair}: {note}")
+                    log_row(pair=pair, action="lock_retry", note=note)
+                    if "closed at market" in note:
+                        trades.pop(pair)
+                except Exception as e:
+                    tg(f"LOCK STOP RETRY FAILED {pair}: {str(e)[:150]}")
 
     counters = {"opened": 0}
     for pair in work:
@@ -319,8 +378,18 @@ def scan_and_trade(cli=None):
 
                 if t is None and kind == "ENTRY" and rdtrade_next is not None:
                     side = "buy" if rdtrade_next["direction"] == "BUY" else "sell"
-                    price = liquid_map[pair]["ltp"]
+                    price = fresh_ltp(pair) or liquid_map[pair]["ltp"]
                     risk = rdtrade_next["risk"]
+                    slip = entry_slip_r(side, rdtrade_next["entry_price"], price, risk)
+                    sl_px = rdtrade_next["sl"]
+                    past_sl = (side == "buy" and price <= sl_px) or (side == "sell" and price >= sl_px)
+                    if slip > ENTRY_MAX_SLIP_R or past_sl:
+                        why = (f"price {price} already past SL {sl_px:.6g}" if past_sl else
+                               f"late entry: price {price} is {slip:.2f}R past paper entry {rdtrade_next['entry_price']} (max {ENTRY_MAX_SLIP_R}R)")
+                        tg(f"ENTRY SKIPPED {pair} {side.upper()}: {why}")
+                        log_row(pair=pair, action="entry_skipped", side=side, price=price, note=why)
+                        rdtrade = None
+                        continue
                     inst = cli.instrument(pair)
                     plan, why = plan_order(side, price, risk, inst, LIVE_LEVERAGE, rdtrade_next["sl"])
                     if not plan:
@@ -339,12 +408,13 @@ def scan_and_trade(cli=None):
                     else:
                         pos_id, fill, stop = f"DRY-{pair}", price, plan["stop"]
                     t = {"rd": rdtrade_next, "pos_id": pos_id, "qty": plan["qty"], "lev": plan["lev"],
-                         "side": side, "fill": fill, "emergency_stop": stop, "entry_ts": str(row["Timestamp"])}
+                         "side": side, "fill": fill, "emergency_stop": stop, "entry_ts": str(row["Timestamp"]),
+                         "paper_entry": rdtrade_next["entry_price"]}
                     trades[pair] = t
                     rdtrade = rdtrade_next
                     counters["opened"] += 1
                     save_state(st)
-                    tg(f"ENTRY {side.upper()} {pair} | Session: {rdtrade_next.get('entry_session', row['Session'])}\nQty {plan['qty']} @ ~{fill} | {plan['lev']:g}x | margin {MARGIN_USDT} USDT\n"
+                    tg(f"ENTRY {side.upper()} {pair} | Session: {rdtrade_next.get('entry_session', row['Session'])}\nQty {plan['qty']} @ ~{fill} (paper entry {rdtrade_next['entry_price']:.6g}, slip {entry_slip_r(side, rdtrade_next['entry_price'], fill, risk):+.2f}R) | {plan['lev']:g}x | margin {MARGIN_USDT} USDT\n"
                        f"Bot SL {rdtrade_next['sl']:.6g} (MACD rule) | Emergency stop {stop} ({plan['dist_pct']:.2f}% away)")
                     log_row(pair=pair, action="entry", side=side, qty=plan["qty"], price=fill, note=f"emergency {stop}")
                     continue
@@ -352,8 +422,22 @@ def scan_and_trade(cli=None):
                 if t is not None:
                     t["rd"] = rdtrade_next if rdtrade_next is not None else t["rd"]
                     if kind == "LOCK":
-                        tg(f"LOCK {pair} ({t['rd'].get('entry_session', '?')} session): {status} -> new bot SL {rdtrade_next['pending_sl']:.6g}")
-                        log_row(pair=pair, action="lock", note=status)
+                        lock_sl = rdtrade_next["pending_sl"]
+                        note = "bot SL only"
+                        if LIVE and LOCK_ON_EXCHANGE:
+                            try:
+                                note = move_stop_to_lock(cli, pair, t, lock_sl)
+                                if "closed at market" in note:
+                                    tg(f"LOCK {pair}: {status} -> {note}")
+                                    log_row(pair=pair, action="lock_exit", note=f"{status}; {note}")
+                                    trades.pop(pair, None)
+                                    t = None
+                                    break
+                            except Exception as e:
+                                t["lock_stop_retry"] = lock_sl
+                                note = f"EXCHANGE LOCK STOP FAILED ({str(e)[:150]}) - will retry next cycle; bot SL still active"
+                        tg(f"LOCK {pair} ({t['rd'].get('entry_session', '?')} session): {status} -> new SL {lock_sl:.6g} | {note}")
+                        log_row(pair=pair, action="lock", note=f"{status}; {note}")
                     if kind == "EXIT":
                         try:
                             if LIVE:
