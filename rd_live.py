@@ -14,6 +14,8 @@ rd_live.py - CoinDCX futures LIVE runner for the rd_trading.py strategy.
 * PROFIT LOCK     : on every paper lock (1:2/1:3/1:4) the exchange stop is moved to the locked SL.
 * PROFIT BLOCK    : after a profit exit (incl. locked stop / manual close in profit) the same coin is not
                     entered again in the same direction until that session (Asian/London/NY) ends.
+* FAST LOCK       : --watch (every minute between scans) applies 1:2/1:3/1:4 locks the moment price touches
+                    them and closes at 1:5, instead of waiting for the 15m candle to close.
 * SAFE BY DEFAULT : unless LIVE_ENABLED=YES this is a DRY RUN (no orders, only alerts).
 
 Usage:
@@ -482,6 +484,72 @@ def scan_and_trade(cli=None):
     save_state(st)
 
 
+# ----------------------------------------------------------------- fast lock watcher (every minute)
+def recent_extremes(pair, seconds=180):
+    """High / low of the last few 1-minute candles (including the one still forming)."""
+    now = int(_time.time())
+    try:
+        payload = rd.http_json(rd.CANDLE_URL, {"pair": pair, "from": now - seconds, "to": now,
+                                               "resolution": "1", "pcode": "f"})
+        raw = payload.get("data", payload.get("candles", [])) if isinstance(payload, dict) else payload
+        hi = max(float(c["high"]) for c in raw)
+        lo = min(float(c["low"]) for c in raw)
+        return hi, lo
+    except Exception:
+        return None, None
+
+
+def watch_locks(cli=None):
+    """Between 15m candles: as soon as price touches 1:2 / 1:3 / 1:4 the lock is applied at once
+    (bot SL + exchange stop); at 1:5 the trade is closed. Does not open any trade."""
+    cli = cli or Client(API_KEY, API_SECRET)
+    st = load_state()
+    trades = st["trades"]
+    changed = False
+    for pair, t in list(trades.items()):
+        if t.get("pending_exit") or not t.get("pos_id"):
+            continue
+        r = t["rd"]
+        risk, entry, is_buy = r.get("risk") or 0, r["entry_price"], r["direction"] == "BUY"
+        if risk <= 0:
+            continue
+        hi, lo = recent_extremes(pair)
+        if hi is None:
+            continue
+        best = ((hi - entry) if is_buy else (entry - lo)) / risk
+        have = max(r.get("locked_rr", 0), r.get("pending_rr", 0))
+        try:
+            if best >= 5.0:
+                if LIVE:
+                    cli.exit_position(t["pos_id"])
+                st["profit_block"].setdefault(pair, {})[r["direction"]] = rd.session_key_now()
+                tg(f"TARGET 1:5 {pair} (fast check) -> full exit at market")
+                log_row(pair=pair, action="exit", side=t["side"], note="Target_1:5 fast")
+                trades.pop(pair)
+                changed = True
+                continue
+            new_lock = 4.0 if best >= 4.0 else (3.0 if best >= 3.0 else (2.0 if best >= 2.0 else 0.0))
+            if new_lock <= have:
+                continue
+            lock_sl = entry + new_lock * risk if is_buy else entry - new_lock * risk
+            r["sl"], r["locked_rr"], r["pending_sl"], r["pending_rr"] = lock_sl, new_lock, None, 0.0
+            changed = True
+            note = "bot SL only (dry run)"
+            if LIVE:
+                note = move_stop_to_lock(cli, pair, t, lock_sl)
+            tg(f"LOCK 1:{new_lock:g} {pair} (fast, same candle) -> SL {lock_sl:.6g} | {note}")
+            log_row(pair=pair, action="lock_fast", note=f"1:{new_lock:g}; {note}")
+            if "closed at market" in note:
+                st["profit_block"].setdefault(pair, {})[r["direction"]] = rd.session_key_now()
+                trades.pop(pair)
+        except Exception as e:
+            t["lock_stop_retry"] = r.get("sl")
+            changed = True
+            tg(f"FAST LOCK FAILED {pair}: {str(e)[:150]} - will retry; bot SL still active")
+    if changed:
+        save_state(st)
+
+
 def probe():
     print(f"LIVE_ENABLED={LIVE} (orders {'WILL' if LIVE else 'will NOT'} be placed)")
     print(f"key length {len(API_KEY)} | secret length {len(API_SECRET)} | key == secret: {API_KEY == API_SECRET}")
@@ -508,5 +576,7 @@ if __name__ == "__main__":
         probe()
     elif "--alert" in sys.argv:
         scan_and_trade()
+    elif "--watch" in sys.argv:
+        watch_locks()
     else:
         print(__doc__)

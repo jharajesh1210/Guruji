@@ -228,6 +228,12 @@ def manage_open_trade(trade, candle, day_pdh, day_pdl):
 
     new_lock = 4.0 if rr >= 4.0 else (3.0 if rr >= 3.0 else (2.0 if rr >= 2.0 else 0.0))
     if new_lock > trade['locked_rr']:
+        lock_px = entry + new_lock * risk if is_buy else entry - new_lock * risk
+        close_px = float(candle['Close'])
+        # Lock turant (same candle): price lock level tak gaya aur candle usi ke neeche (SELL: upar) band hui
+        # -> reversal ne lock level cross kiya -> wahi locked level par exit.
+        if (is_buy and close_px <= lock_px) or ((not is_buy) and close_px >= lock_px):
+            return f"SL_Hit_Exit_Locked_1:{new_lock:g}", _pnl(entry, new_lock * risk), None
         trade['pending_rr'] = new_lock
         trade['pending_sl'] = entry + new_lock * risk if is_buy else entry - new_lock * risk
         status = f"Profit_Locked_at_1:{new_lock:g}"
