@@ -252,7 +252,7 @@ def session_key(date, session):
 
 
 def session_key_now():
-    now = pd.Timestamp.utcnow().tz_convert("Asia/Kolkata").tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_convert("Asia/Kolkata").tz_localize(None)
     sess = assign_session(now)
     day = (now - timedelta(days=1)).date() if (sess == 'NY' and now.time() < time(5, 30)) else now.date()
     return session_key(day, sess)

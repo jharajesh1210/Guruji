@@ -171,7 +171,7 @@ def tg(msg, dry=None):
 
 
 def log_row(**kw):
-    kw["ts"] = pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    kw["ts"] = pd.Timestamp.now("UTC").strftime("%Y-%m-%d %H:%M:%S")
     kw["mode"] = "LIVE" if LIVE else "DRY"
     new = not os.path.exists(LOG_FILE)
     with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
