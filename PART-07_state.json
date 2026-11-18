@@ -1,23 +1,5 @@
 {
   "open": {
-    "B-PIEVERSE_USDT": {
-      "side": "LONG",
-      "session": "LONDON",
-      "entry": 2.286,
-      "stop": 2.1658,
-      "initial_stop": 2.1658,
-      "target": 2.7668000000000004,
-      "risk_dist": 0.12020000000000008,
-      "notional": 19.018302828618957,
-      "qty": 8.319467554076533,
-      "risk_budget": 1.0,
-      "quant_score": 8,
-      "orb_time": "2026-11-18T09:55:00+00:00",
-      "quant_time": "2026-11-18T09:45:00+00:00",
-      "entry_time": "2026-11-18T09:55:00+00:00",
-      "bars": 0,
-      "lock": 0
-    },
     "B-AVAX_USDT": {
       "side": "SHORT",
       "session": "LONDON",
@@ -45,8 +27,8 @@
     "B-LINK_USDT": "2026-11-14T18:20:00+00:00",
     "B-LTC_USDT": "2026-11-16T14:20:00+00:00",
     "B-ETH_USDT": "2026-11-17T17:35:00+00:00",
-    "B-PIEVERSE_USDT": "2026-11-18T11:45:00+00:00",
-    "B-AVAX_USDT": "2026-11-18T11:45:00+00:00"
+    "B-PIEVERSE_USDT": "2026-11-18T11:50:00+00:00",
+    "B-AVAX_USDT": "2026-11-18T11:50:00+00:00"
   },
   "last_15m": {
     "B-BTC_USDT": "2026-11-18T11:30:00+00:00",
@@ -276,6 +258,31 @@
       "quant_score": 8,
       "orb_time": "2026-11-17T15:40:00+00:00",
       "quant_time": "2026-11-17T15:30:00+00:00"
+    },
+    {
+      "strategy": "PART-07_CONFLUENCE",
+      "pair": "B-PIEVERSE_USDT",
+      "side": "LONG",
+      "session": "LONDON",
+      "entry_time": "2026-11-18T09:55:00+00:00",
+      "exit_time": "2026-11-18T11:50:00+00:00",
+      "entry": 2.286,
+      "exit": 2.3872,
+      "stop_initial": 2.1658,
+      "stop_final": 2.1658,
+      "target": 2.7668000000000004,
+      "quantity": 8.319467554076533,
+      "notional_usdt": 19.018302828618957,
+      "margin_est_usdt": 0.6339434276206319,
+      "leverage": 30.0,
+      "gross_pnl_usdt": 0.8419301164725448,
+      "fees_gst_usdt": 0.022441597337770368,
+      "net_pnl_usdt": 0.8194885191347744,
+      "net_r": 0.8194885191347744,
+      "exit_reason": "TIME_STOP_2H",
+      "quant_score": 8,
+      "orb_time": "2026-11-18T09:55:00+00:00",
+      "quant_time": "2026-11-18T09:45:00+00:00"
     }
   ]
 }
