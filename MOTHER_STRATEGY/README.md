@@ -2,7 +2,7 @@
 
 Ye folder **sirf record ke liye** hai. Isme koi change NAHI karna.
 Chalne wala code `rd_trading.py` (paper) aur `rd_live.py` (live) hai — unme change ho sakta hai,
-lekin original hamesha yahan aur git tag `mother-strategy-v1` mein milega.
+lekin original hamesha yahan aur GitHub branch `mother-strategy-v1` mein milega (is branch par kabhi kaam nahi karna).
 
 Files:
 - `rd_trading_MOTHER_v1.py` — paper / strategy logic (source of truth)
@@ -11,7 +11,7 @@ Files:
 
 Wapas laane ke liye (server par):
 ```
-cd ~/Guruji && git fetch --tags && git checkout mother-strategy-v1 -- rd_trading.py rd_live.py
+cd ~/Guruji && git fetch origin mother-strategy-v1 && git checkout origin/mother-strategy-v1 -- rd_trading.py rd_live.py
 ```
 
 ## Strategy ke rules
