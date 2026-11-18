@@ -25,7 +25,7 @@ LEVERAGE = float(os.getenv("LEVERAGE", "30"))
 POSITION_USDT = CAPITAL_USDT * LEVERAGE                      
 MAX_LOSS_USDT = float(os.getenv("MAX_LOSS_USDT", "100"))     
 MAX_RISK_PCT = float(os.getenv("MAX_RISK_PCT", "2.0"))       
-MIN_RISK_PCT = float(os.getenv("MIN_RISK_PCT", "0.15"))      
+MIN_RISK_PCT = float(os.getenv("MIN_RISK_PCT", "0.3"))   # 0.15 -> 0.3 after 30-day 1m backtest (fees)      
 SL_MODE = os.getenv("SL_MODE", "candle").lower()             
 RISK_CAP_PCT = min(MAX_RISK_PCT, MAX_LOSS_USDT / POSITION_USDT * 100)
 
