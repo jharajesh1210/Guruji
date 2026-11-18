@@ -233,8 +233,12 @@ def stats(rows, key):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    pairs = rd.fetch_liquid_pairs()
-    order_all = [p["pair"] for p in pairs]
+    only = [x.strip() for x in os.getenv("BT_PAIRS", "").split(",") if x.strip()]
+    if only:                                   # fixed coin list (e.g. gold only), no 24h-volume ranking
+        order_all = only
+    else:
+        pairs = rd.fetch_liquid_pairs()
+        order_all = [p["pair"] for p in pairs]
     print(f"Liquid pairs: {len(order_all)}", flush=True)
     data = {}
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
