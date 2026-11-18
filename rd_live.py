@@ -10,7 +10,7 @@ rd_live.py - CoinDCX futures LIVE runner for the rd_trading.py strategy.
 * EMERGENCY STOP  : a far stop_market order placed on the exchange right after entry
                     (entry -/+ min(1.5R, 2.5% of price), never nearer than the SL).
                     If it cannot be placed, the position is closed immediately.
-* ENTRY GUARD     : skips the entry if live price is already > ENTRY_MAX_SLIP_R (0.3R) past the paper entry.
+* ENTRY GUARD     : skips the entry if live price is already > ENTRY_MAX_SLIP_R (0.75R) past the paper entry.
 * PROFIT LOCK     : on every paper lock (1:2/1:3/1:4) the exchange stop is moved to the locked SL.
 * PROFIT BLOCK    : after a profit exit (incl. locked stop / manual close in profit) the same coin is not
                     entered again in the same direction until that session (Asian/London/NY) ends.
@@ -53,8 +53,8 @@ EMERGENCY_R = float(os.getenv("EMERGENCY_R", "1.5"))
 EMERGENCY_MAX_PCT = float(os.getenv("EMERGENCY_MAX_PCT", "2.5"))
 ENTRY_MAX_AGE_BARS = int(os.getenv("ENTRY_MAX_AGE_BARS", "2"))   # only act on entries from the newest N candles
 # Entry chase guard: paper enters at the breakout candle close. If the live price has already run more than
-# ENTRY_MAX_SLIP_R x risk past that close (against us), skip - a late, worse fill makes the 1:2 lock unreachable.
-ENTRY_MAX_SLIP_R = float(os.getenv("ENTRY_MAX_SLIP_R", "0.3"))
+# ENTRY_MAX_SLIP_R (0.75, backtested 30 days: better than 0.3) x risk past that close (against us), skip - a late, worse fill makes the 1:2 lock unreachable.
+ENTRY_MAX_SLIP_R = float(os.getenv("ENTRY_MAX_SLIP_R", "0.75"))
 # Profit lock on the exchange: when paper locks 1:2 / 1:3 / 1:4, move the exchange stop to that locked level
 # (instead of only the far emergency stop) so the locked profit is protected between bot cycles.
 LOCK_ON_EXCHANGE = os.getenv("LOCK_ON_EXCHANGE", "YES").strip().upper() == "YES"
