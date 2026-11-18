@@ -130,13 +130,13 @@ def load_1m(tr):
 from collections import namedtuple
 Min = namedtuple("Min", "ts open high low close")
 
-def sim_live(tr, recs, daily, m1, mode, guard):
+def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True):
     """Returns dict(result) or None if skipped by the guard."""
     buy = tr["dir"] == "BUY"
     E, R, SL = tr["E"], tr["R"], tr["SL"]
     sgn = 1 if buy else -1
     first = m1.iloc[0]
-    fill = (first["open"] + first["close"]) / 2
+    fill = E if ideal_fill else (first["open"] + first["close"]) / 2
     slip = sgn * (fill - E) / R
     past_sl = (buy and fill <= SL) or ((not buy) and fill >= SL)
     if past_sl or (guard is not None and slip > guard):
@@ -214,10 +214,10 @@ def sim_live(tr, recs, daily, m1, mode, guard):
     if exit_px is None:
         exit_px, why = float(recs[min(ri, len(recs) - 1)]["Close"]), "open_at_end"
     gross_r = sgn * (exit_px - fill) / R
-    fee_r = FEE_RT * fill / R
-    usdt = LIVE_NOTIONAL * sgn * (exit_px - fill) / fill - LIVE_NOTIONAL * FEE_RT
+    fee_r = FEE_RT * fill / R if fees else 0.0
+    usdt = LIVE_NOTIONAL * sgn * (exit_px - fill) / fill - (LIVE_NOTIONAL * FEE_RT if fees else 0.0)
     return {"pair": tr["pair"], "entry_ts": tr["entry_ts"], "dir": tr["dir"], "slip_r": round(slip, 3),
-            "exit": why, "R": gross_r - fee_r, "usdt": usdt}
+            "exit": why, "R": gross_r - fee_r, "usdt": usdt, "fee_r": fee_r}
 
 
 def stats(rows, key):
@@ -295,6 +295,38 @@ def main():
             lines.append(f"| {name} | {s['n']} | {skipped} | {s['wins']} | {s['win']} | {s['net']} | {su['net']} | {s['pf']} | {s['dd']} |")
             print(f"{name}: net {s['net']}R / {su['net']} USDT, trades {s['n']}, skipped {skipped}", flush=True)
     pd.DataFrame(all_rows).to_csv(os.path.join(OUT, "live_sim_trades.csv"), index=False)
+
+    # ---- where does live lose vs paper? (FAST, no guard) step by step
+    def run(mode, ideal, fees):
+        rows = []
+        for i in usable:
+            t = trades[i]
+            recs, daily = data[t["pair"]]
+            r = sim_live(t, recs, daily, m1s[i], mode, None, ideal_fill=ideal, fees=fees)
+            if r is not None:
+                rows.append(r)
+        return rows
+    steps = ["", "| Step (no guard) | Trades | Net R | Net USDT @20 |", "|---|---|---|---|",
+             f"| Paper | {p['n']} | {p['net']} | {pu['net']} |"]
+    for mode in MODES:
+        for label, ideal, fees in ((f"{mode}: fill at paper price, no fees", True, False),
+                                   (f"{mode}: real fill (1st minute), no fees", False, False),
+                                   (f"{mode}: real fill + fees", False, True)):
+            rr = run(mode, ideal, fees)
+            a, b = stats(rr, "R"), stats(rr, "usdt")
+            steps.append(f"| {label} | {a['n']} | {a['net']} | {b['net']} |")
+    xr = pd.DataFrame(run("FAST", False, True))
+    steps += ["", f"Avg entry slip: {xr['slip_r'].mean():.3f}R (median {xr['slip_r'].median():.3f}R); "
+                  f"avg fee {xr['fee_r'].mean():.3f}R (median {xr['fee_r'].median():.3f}R)", "",
+              "| Exit type (FAST, no guard) | Trades | Net R | Net USDT @20 |", "|---|---|---|---|"]
+    for k, g in xr.groupby("exit"):
+        steps.append(f"| {k} | {len(g)} | {g['R'].sum():.2f} | {g['usdt'].sum():.2f} |")
+    pt = pd.DataFrame([{"st": trades[i]["status"].split("_1:")[0], "R": paper_rows[k]["R"], "usdt": paper_rows[k]["usdt"]}
+                       for k, i in enumerate(usable)])
+    steps += ["", "| Paper exit type | Trades | Net R | Net USDT @20 |", "|---|---|---|---|"]
+    for k, g in pt.groupby("st"):
+        steps.append(f"| {k} | {len(g)} | {g['R'].sum():.2f} | {g['usdt'].sum():.2f} |")
+    lines += steps
     summary = (f"Paper trades {tmin} -> {tmax}, {len(usable)} trades with 1m data (of {len(trades)}), pairs {len(order)}\n"
                f"Live: fill = mid of first 1m candle after the entry candle, fees {FEE_RT*100:.3f}% round trip, "
                f"7% emergency stop, size {LIVE_NOTIONAL:g} USDT notional\n\n" + "\n".join(lines))
