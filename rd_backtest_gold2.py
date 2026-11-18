@@ -87,8 +87,8 @@ def to_1h(df15):
     return h.reset_index()
 
 
-def simulate(df, sl_mode, loss_mode, target, asian):
-    T = {"ladder5": 5.0, "t3": 3.0, "t2": 2.0}[target]
+def simulate(df, sl_mode, loss_mode, target, asian, signal="breakout", vol_req=True, wick_req=False):
+    T = {"ladder5": 5.0, "t3": 3.0, "t2": 2.0, "t1.5": 1.5, "t1": 1.0}[target]
     locks = [l for l in (2.0, 3.0, 4.0) if l < T]
     O, H, L, C = (df[c].values for c in ("Open", "High", "Low", "Close"))
     trades, i, n = [], 1, len(df)
@@ -104,10 +104,17 @@ def simulate(df, sl_mode, loss_mode, target, asian):
         dn_w = (min(r["Open"], r["Close"]) - r["Low"]) / rng if rng > 0 else 0
         hv = r["Volume"] > 1.5 * r["VolMA"]
         d = None
-        if r["High"] > pdh and r["Close"] > pdh and hv and up_w < 0.4:
-            d = 1
-        elif r["Low"] < pdl and r["Close"] < pdl and hv and dn_w < 0.4:
-            d = -1
+        if signal == "breakout":
+            if r["High"] > pdh and r["Close"] > pdh and hv and up_w < 0.4:
+                d = 1
+            elif r["Low"] < pdl and r["Close"] < pdl and hv and dn_w < 0.4:
+                d = -1
+        else:   # fade: price pokes beyond PDH/PDL but the candle closes back inside -> trade back into the range
+            vok = hv or not vol_req
+            if r["High"] > pdh and r["Close"] < pdh and vok and (up_w >= 0.4 or not wick_req):
+                d = -1
+            elif r["Low"] < pdl and r["Close"] > pdl and vok and (dn_w >= 0.4 or not wick_req):
+                d = 1
         skey = f"{r['Date']}|{r['Session']}"
         if d is None or (not asian and r["Session"] == "Asian") or block.get(d) == skey:
             i += 1
