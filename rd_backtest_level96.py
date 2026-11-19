@@ -24,16 +24,16 @@ DAYS = int(os.getenv("BT_DAYS", "90"))
 LIVE_DAYS = int(os.getenv("BT_LIVE_DAYS", "30"))
 OUT = os.getenv("BT_OUT", "backtest_out")
 bs.DAYS = DAYS + 2
-N = 96
+LEVELS = [int(x) for x in os.getenv("BT_LEVELS", "96").split(",") if x.strip()]
 
 _orig_levels = rd.levels_for
-CUR = {"row": None, "mode": "pdh"}
+CUR = {"row": None, "mode": "pdh", "n": 96}
 
 
 def levels_patched(date, daily):
     if CUR["mode"] == "roll" and CUR["row"] is not None:
         r = CUR["row"]
-        h, l = r.get("RH"), r.get("RL")
+        h, l = r.get(f"RH{CUR['n']}"), r.get(f"RL{CUR['n']}")
         if h == h and l == l and h is not None:
             return float(h), float(l)
         return None, None
@@ -45,15 +45,18 @@ rd.levels_for = levels_patched
 
 def add_rolling(recs):
     s = pd.DataFrame({"H": [r["High"] for r in recs], "L": [r["Low"] for r in recs]})
-    rh = s["H"].shift(1).rolling(N, min_periods=N).max().values
-    rl = s["L"].shift(1).rolling(N, min_periods=N).min().values
-    for r, a, b in zip(recs, rh, rl):
-        r["RH"], r["RL"] = a, b
+    for n in LEVELS:
+        rh = s["H"].shift(1).rolling(n, min_periods=n).max().values
+        rl = s["L"].shift(1).rolling(n, min_periods=n).min().values
+        for r, a, b in zip(recs, rh, rl):
+            r[f"RH{n}"], r[f"RL{n}"] = a, b
 
 
 def paper_trades(data, order, mode):
-    """Same as rd_backtest_live.paper_trades, plus the level mode."""
-    CUR["mode"] = mode
+    """Same as rd_backtest_live.paper_trades, plus the level mode ("pdh" or "roll<N>")."""
+    CUR["mode"] = "roll" if mode.startswith("roll") else "pdh"
+    if mode.startswith("roll"):
+        CUR["n"] = int(mode[4:])
     ev = []
     for pi, pair in enumerate(order):
         for ri, r in enumerate(data[pair][0]):
@@ -144,17 +147,18 @@ def main():
     print(f"{len(order)} coins, {t0} -> {t1}", flush=True)
 
     res = {}
-    for mode, name in (("pdh", "PDH/PDL (now)"), ("roll", "Rolling last 96 candles")):
+    MODES = [("pdh", "PDH/PDL (now)")] + [(f"roll{n}", f"Rolling last {n} candles") for n in LEVELS]
+    for mode, name in MODES:
         tr = [t for t in paper_trades(data, order, mode) if "exit_ts" in t]
         res[mode] = (name, tr)
         print(f"{name}: {len(tr)} trades", flush=True)
 
-    lines = [f"PDH/PDL vs rolling 96-candle level. {len(order)} coins, data {t0} -> {t1}. "
+    lines = [f"PDH/PDL vs rolling N-candle levels {LEVELS}. {len(order)} coins, data {t0} -> {t1}. "
              f"Real rd_trading logic + caps (5 open). Live estimate = next-open fill + 0.118% fees, 20 USDT/trade.", "",
              f"### Stage 1 - {DAYS} days (15m)", "",
              "| Level | Trades | Paper win % | Paper net R | Live-est net R | Live-est USDT @20 | PF (USDT) | Max DD USDT | 1st half USDT | 2nd half USDT |",
              "|---|---|---|---|---|---|---|---|---|---|"]
-    for mode in ("pdh", "roll"):
+    for mode, _ in MODES:
         name, tr = res[mode]
         rows = stage1_rows(tr, data)
         p, r, u = summ(rows, "paperR"), summ(rows, "R"), summ(rows, "usdt")
@@ -168,7 +172,7 @@ def main():
     cut = t1 - pd.Timedelta(days=LIVE_DAYS)
     lines += ["", f"### Stage 2 - last {LIVE_DAYS} days, live simulation on 1m (fast lock, 0.75R guard, fees)", "",
               "| Level | Live trades | Skipped late | Win % | Net R | Net USDT @20 | PF | Max DD R |", "|---|---|---|---|---|---|---|---|"]
-    for mode in ("pdh", "roll"):
+    for mode, _ in MODES:
         name, tr = res[mode]
         recent = [t for t in tr if t["entry_ts"] >= cut]
         with ThreadPoolExecutor(max_workers=bl.WORKERS) as ex:
@@ -177,7 +181,7 @@ def main():
         for t, m in zip(recent, m1s):
             if m is None or len(m) < 2:
                 continue
-            CUR["mode"], CUR["row"] = mode, None
+            CUR["mode"], CUR["row"] = ("roll" if mode.startswith("roll") else "pdh"), None
             recs, daily = data[t["pair"]]
             r = bl.sim_live(t, recs, daily, m, "FAST", 0.75)
             if r is None:
