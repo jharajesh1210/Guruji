@@ -130,7 +130,7 @@ def load_1m(tr):
 from collections import namedtuple
 Min = namedtuple("Min", "ts open high low close")
 
-def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True):
+def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock_lag=0.0, be=False):
     """Returns dict(result) or None if skipped by the guard."""
     buy = tr["dir"] == "BUY"
     E, R, SL = tr["E"], tr["R"], tr["SL"]
@@ -177,7 +177,8 @@ def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True):
             if mode == "FAST":
                 L = 4.0 if best >= 4 else (3.0 if best >= 3 else (2.0 if best >= 2 else 0.0))
                 if L > locked:
-                    locked, stop = L, E + sgn * L * R
+                    lvl = 0.0 if (be and L == 2.0) else L - lock_lag
+                    locked, stop = L, E + sgn * lvl * R
                     if (buy and mm.close <= stop) or ((not buy) and mm.close >= stop):
                         exit_px, why = mm.close, f"lock_fast_market_1:{L:g}"
                         break
@@ -204,7 +205,8 @@ def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True):
             best = sgn * ((hi if buy else lo) - E) / R
             L = 4.0 if best >= 4 else (3.0 if best >= 3 else (2.0 if best >= 2 else 0.0))
             if L > locked:
-                locked, stop = L, E + sgn * L * R
+                lvl = 0.0 if (be and L == 2.0) else L - lock_lag
+                locked, stop = L, E + sgn * lvl * R
                 if (buy and cl <= stop) or ((not buy) and cl >= stop):
                     exit_px, why = cl, f"lock_candle_market_1:{L:g}"
                     break
