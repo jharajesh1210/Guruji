@@ -14,7 +14,7 @@ DAYS = int(os.getenv("BT_DAYS", "30"))
 OUT = os.getenv("BT_OUT", "backtest_out")
 g.DAYS = DAYS + 2
 g.MIN_RISK, g.MAX_RISK = rd.MIN_RISK_PCT / 100, 0.02
-VARIANTS = ["PDH/PDL", 24, 40, 60, 96]
+VARIANTS = ["PDH/PDL"] + [int(x) for x in os.getenv("BT_LOOKBACKS", "24,40,60,96").split(",") if x.strip()]
 
 
 def run(pair):
