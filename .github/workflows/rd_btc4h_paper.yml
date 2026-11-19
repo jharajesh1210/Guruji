@@ -1,0 +1,47 @@
+# rd_btc4h_paper.py: PAPER test of the BTC 4h logic (4h breakout, ATR SL, MACD loss exit, 1:5 ladder).
+# No real orders. Runs every 15 minutes (only acts when a new 4h candle has closed).
+name: rd_btc4h_paper (BTC 4h, PAPER)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rd-btc4h-paper
+  cancel-in-progress: false
+
+jobs:
+  btc4h:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TG_TOKEN: ${{ secrets.TG_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install requests numpy pandas
+      - name: Run one BTC 4h paper step
+        run: python -u rd_btc4h_paper.py
+      - name: Save state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for f in rd_btc4h_state.json rd_btc4h_trades.csv; do [ -f "$f" ] && git add "$f"; done
+          git diff --cached --quiet && exit 0
+          git commit -m "Update rd_btc4h paper state"
+          for i in 1 2 3 4 5; do
+            git pull --rebase -X theirs origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
