@@ -81,8 +81,11 @@ def prep(df):
     return df
 
 
-def to_1h(df15):
-    g = df15.set_index("Timestamp").resample("1h", origin="start_day", offset="30min")
+TFS = [x.strip() for x in os.getenv("BT_TFS", "15m,1h").split(",") if x.strip()]
+
+
+def to_1h(df15, rule="1h"):
+    g = df15.set_index("Timestamp").resample(rule, origin="start_day", offset="330min")
     h = g.agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}).dropna()
     return h.reset_index()
 
@@ -203,10 +206,10 @@ def main():
         if d15.empty or len(d15) < 500:
             print(f"{p}: no data")
             continue
-        data[p] = {"15m": prep(d15), "1h": prep(to_1h(d15))}
+        data[p] = {tf: (prep(d15) if tf == "15m" else prep(to_1h(d15, tf))) for tf in TFS}
         print(f"{p}: 15m {d15['Timestamp'].iloc[0]} -> {d15['Timestamp'].iloc[-1]} ({len(d15)} bars)", flush=True)
     rows = []
-    for tf, slm, lm, tg, asian in itertools.product(["15m", "1h"], ["candle", "atr"], ["macd", "hard"],
+    for tf, slm, lm, tg, asian in itertools.product(TFS, ["candle", "atr"], ["macd", "hard"],
                                                     ["ladder5", "t3", "t2"], [True, False]):
         per, allt = {}, []
         for p in data:
@@ -224,7 +227,7 @@ def main():
         head = "| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n"
         return head + "\n".join("| " + " | ".join(str(v) for v in r) + " |" for r in df[cols].values)
     span = {p: f"{data[p]['15m']['Timestamp'].iloc[0]} -> {data[p]['15m']['Timestamp'].iloc[-1]}" for p in data}
-    text = ("Gold-only grid (XAU, PAXG). USDT = 20 USDT notional per trade after 0.118% fees. "
+    text = (f"Grid on {list(data)}. USDT = 20 USDT notional per trade after 0.118% fees. "
             "h1/h2 = USDT in first/second half of the trades (consistency).\n"
             f"Data: {span}\n\n### Mother-like baseline (15m, candle SL, MACD wait, 1:5 ladder, Asian on)\n\n"
             + table(base) + "\n\n### Top 12 combinations\n\n" + table(res.head(12))

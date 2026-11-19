@@ -26,10 +26,10 @@ def main():
         if d15.empty or len(d15) < 500:
             print(f"{p}: no data")
             continue
-        data[p] = {"15m": g.prep(d15), "1h": g.prep(g.to_1h(d15))}
+        data[p] = {tf: (g.prep(d15) if tf == "15m" else g.prep(g.to_1h(d15, tf))) for tf in g.TFS}
         print(f"{p}: {d15['Timestamp'].iloc[0]} -> {d15['Timestamp'].iloc[-1]}", flush=True)
     rows = []
-    for tf, slm, tg, asian, vol, wick in itertools.product(["15m", "1h"], ["candle", "atr"], ["t1", "t1.5", "t2", "t3"],
+    for tf, slm, tg, asian, vol, wick in itertools.product(g.TFS, ["candle", "atr"], ["t1", "t1.5", "t2", "t3"],
                                                            [True, False], [True, False], [True, False]):
         per, allt = {}, []
         for p in data:
@@ -49,7 +49,7 @@ def main():
                 + "\n".join("| " + " | ".join(str(v) for v in r) + " |" for r in df[cols].values))
     pos = res[(res.usdt > 0)]
     robust = res[(res.h1 > 0) & (res.h2 > 0) & (res.filter(like="usdt_").gt(0).all(axis=1))]
-    text = (f"Gold FADE grid. {len(res)} combinations, {len(pos)} positive after fees, "
+    text = (f"FADE grid on {list(data)}. {len(res)} combinations, {len(pos)} positive after fees, "
             f"{len(robust)} positive in BOTH halves AND on BOTH coins.\n\n### Top 15\n\n" + table(res.head(15))
             + "\n\n### Robust (both halves + both coins positive)\n\n" + (table(robust.head(15)) if len(robust) else "none")
             + "\n\n### Worst 5\n\n" + table(res.tail(5)) + "\n")
