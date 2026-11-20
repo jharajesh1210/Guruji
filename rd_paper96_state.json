@@ -123,22 +123,10 @@
     "B-HUMA_USDT|2026-11-20 07:30:00|Stop_Loss_Hit_MACD_Confirmed",
     "B-CHIP_USDT|2026-11-20 07:30:00|Valid_Bearish_Breakout_SELL",
     "B-PAXG_USDT|2026-11-20 08:00:00|SL_Hit_Exit_Locked_1:2",
-    "B-LIT_USDT|2026-11-20 08:00:00|Valid_Bearish_Breakout_SELL"
+    "B-LIT_USDT|2026-11-20 08:00:00|Valid_Bearish_Breakout_SELL",
+    "B-XAU_USDT|2026-11-20 08:00:00|SL_Hit_Exit_Locked_1:2"
   ],
   "trades": {
-    "B-XAU_USDT": {
-      "direction": "SELL",
-      "entry_price": 3581.91,
-      "sl": 3605.03,
-      "risk": 23.120000000000346,
-      "locked_rr": 0.0,
-      "pending_sl": null,
-      "pending_rr": 0.0,
-      "carried_over": false,
-      "entry_ts": "2026-11-20 06:45:00",
-      "entry_date": "2026-11-20",
-      "entry_session": "Asian"
-    },
     "B-ADA_USDT": {
       "direction": "SELL",
       "entry_price": 0.1492,
@@ -193,9 +181,9 @@
     }
   },
   "last_ts": {
-    "B-BTC_USDT": "2026-11-20 07:45:00",
-    "B-ETH_USDT": "2026-11-20 07:45:00",
-    "B-XAU_USDT": "2026-11-20 07:45:00",
+    "B-BTC_USDT": "2026-11-20 08:00:00",
+    "B-ETH_USDT": "2026-11-20 08:00:00",
+    "B-XAU_USDT": "2026-11-20 08:00:00",
     "B-SOL_USDT": "2026-11-20 08:00:00",
     "B-XAG_USDT": "2026-11-20 08:00:00",
     "B-ZEC_USDT": "2026-11-20 08:00:00",
@@ -335,7 +323,9 @@
   "profit_block": {
     "B-BTC_USDT": {},
     "B-ETH_USDT": {},
-    "B-XAU_USDT": {},
+    "B-XAU_USDT": {
+      "SELL": "2026-11-20|Asian"
+    },
     "B-SOL_USDT": {},
     "B-XAG_USDT": {},
     "B-ZEC_USDT": {},
