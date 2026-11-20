@@ -298,6 +298,15 @@ def open_position(cli, pair, side, qty, lev, stop_ref_price, risk, sl=None):
     fill = float(pos.get("avg_price") or stop_ref_price)
     inst = cli.instrument(pair)
     dist = min(emergency_dist(fill, risk, sl), fill * LIQ_SAFETY / lev)
+    # loss cap (same rule as paper): exchange stop at 1.5R or 3% from the paper entry, whichever is nearer
+    if sl and risk and (rd.LOSS_CAP_R > 0 or rd.LOSS_CAP_PCT > 0):
+        e_paper = sl + risk if side == "buy" else sl - risk
+        cap = min(rd.LOSS_CAP_R * risk if rd.LOSS_CAP_R > 0 else 1e18,
+                  e_paper * rd.LOSS_CAP_PCT / 100 if rd.LOSS_CAP_PCT > 0 else 1e18)
+        cap_px = e_paper - cap if side == "buy" else e_paper + cap
+        cap_from_fill = (fill - cap_px) if side == "buy" else (cap_px - fill)
+        if cap_from_fill > 0:
+            dist = min(dist, cap_from_fill)
     stop = fill - dist if side == "buy" else fill + dist
     stop = round_near(stop, inst.get("price_increment") or 0.0001)
     try:
@@ -338,7 +347,7 @@ def live_cycle(cli=None, paper_local=None):
             if trades[pair].get("pos_id") and pair not in exch_open and not trades[pair].get("pending_exit"):
                 tr = trades[pair]
                 why = (f"locked-profit stop {tr['lock_on_exchange']}" if tr.get("lock_on_exchange")
-                       else "emergency stop or manual")
+                       else "loss-cap stop (1.5R/3%) or manual")
                 # profit exit (locked, or closed by hand while in profit) -> same coin, same direction blocked this session
                 rdt = tr.get("rd") or {}
                 ltp = fresh_ltp(pair)
@@ -599,16 +608,16 @@ def watch_locks(cli=None):
         best = ((hi - entry) if is_buy else (entry - lo)) / risk
         have = max(r.get("locked_rr", 0), r.get("pending_rr", 0))
         try:
-            if best >= 5.0:
+            if best >= rd.TARGET_RR:
                 if LIVE:
                     cli.exit_position(t["pos_id"])
                 st["profit_block"].setdefault(pair, {})[r["direction"]] = rd.session_key_now()
-                tg(f"TARGET 1:5 {pair} (fast check) -> full exit at market")
-                log_row(pair=pair, action="exit", side=t["side"], note="Target_1:5 fast")
+                tg(f"TARGET 1:{rd.TARGET_RR:g} {pair} (fast check) -> full exit at market")
+                log_row(pair=pair, action="exit", side=t["side"], note=f"Target_1:{rd.TARGET_RR:g} fast")
                 trades.pop(pair)
                 changed = True
                 continue
-            new_lock = 4.0 if best >= 4.0 else (3.0 if best >= 3.0 else (2.0 if best >= 2.0 else 0.0))
+            new_lock = max([l for l in rd.LOCK_LEVELS if best >= l], default=0.0)
             if new_lock <= have:
                 continue
             lock_sl = entry + new_lock * risk if is_buy else entry - new_lock * risk

@@ -25,7 +25,13 @@ LEVERAGE = float(os.getenv("LEVERAGE", "30"))
 POSITION_USDT = CAPITAL_USDT * LEVERAGE                      
 MAX_LOSS_USDT = float(os.getenv("MAX_LOSS_USDT", "100"))     
 MAX_RISK_PCT = float(os.getenv("MAX_RISK_PCT", "2.0"))       
-MIN_RISK_PCT = float(os.getenv("MIN_RISK_PCT", "0.3"))   # 0.15 -> 0.3 after 30-day 1m backtest (fees)      
+MIN_RISK_PCT = float(os.getenv("MIN_RISK_PCT", "0.75"))  # 0.15 -> 0.3 -> 0.75 (20 Nov, 90-day live-style backtest)
+# 20 Nov 2026 (90-day live-style backtest, rd_backtest_cap.md: -79 -> -18 USDT, max DD -119 -> -42):
+MAX_ENTRY_DIST_PCT = float(os.getenv("MAX_ENTRY_DIST_PCT", "0.5"))  # close at most 0.5% beyond PDH/PDL, else skip
+LOSS_CAP_R = float(os.getenv("LOSS_CAP_R", "1.5"))       # no profit locked: exit at once at SL + 0.5R (=1.5R) ...
+LOSS_CAP_PCT = float(os.getenv("LOSS_CAP_PCT", "3.0"))   # ... or 3% of price, whichever is nearer
+LOCK_LEVELS = (2.0, 3.0, 4.0, 5.0)                       # lock ladder 1:2 / 1:3 / 1:4 / 1:5
+TARGET_RR = float(os.getenv("TARGET_RR", "6.0"))         # full exit at 1:6 (was 1:5)      
 SL_MODE = os.getenv("SL_MODE", "candle").lower()             
 RISK_CAP_PCT = min(MAX_RISK_PCT, MAX_LOSS_USDT / POSITION_USDT * 100)
 
@@ -132,6 +138,9 @@ def detect_signal(row, pdh, pdl):
         sl, risk = build_stop(direction, row)
         if risk < entry * MIN_RISK_PCT / 100:
             return "Skipped_SL_Too_Tight", None
+        beyond = (entry - pdh) if direction == "BUY" else (pdl - entry)
+        if MAX_ENTRY_DIST_PCT > 0 and beyond > entry * MAX_ENTRY_DIST_PCT / 100:
+            return "Skipped_Late_Entry_Too_Far_From_Level", None
         trade = {
             'direction': direction,
             'entry_price': entry,
@@ -168,6 +177,16 @@ def manage_open_trade(trade, candle, day_pdh, day_pdl):
         trade['locked_rr'] = trade['pending_rr']
         trade['pending_sl'] = None
         trade['pending_rr'] = 0.0
+
+    # 1b) Loss cap: no profit locked -> exit at once at 1.5R or 3% (whichever is nearer), no MACD wait
+    if trade['locked_rr'] <= 0 and (LOSS_CAP_R > 0 or LOSS_CAP_PCT > 0):
+        cap_dist = min(LOSS_CAP_R * risk if LOSS_CAP_R > 0 else 1e18, entry * LOSS_CAP_PCT / 100 if LOSS_CAP_PCT > 0 else 1e18)
+        cap_px = entry - cap_dist if is_buy else entry + cap_dist
+        if (is_buy and low <= cap_px) or ((not is_buy) and high >= cap_px):
+            op = float(candle['Open'])
+            exit_px = min(cap_px, op) if is_buy else max(cap_px, op)
+            move = (exit_px - entry) if is_buy else (entry - exit_px)
+            return f"Stop_Loss_Hit_Loss_Cap_{cap_dist / risk:.2f}R", max(_pnl(entry, move), -MAX_LOSS_USDT), None
 
     # 2) Stop loss check
     sl = trade['sl']
@@ -213,20 +232,20 @@ def manage_open_trade(trade, candle, day_pdh, day_pdl):
     # 3) Agle din ka PDH/PDL break
     if trade.get('carried_over'):
         if is_buy and high >= day_pdh and day_pdh > entry:
-            reward = min(day_pdh - entry, 5.0 * risk)
+            reward = min(day_pdh - entry, TARGET_RR * risk)
             return f"Next_Day_PDH_Break_Exit_1:{reward / risk:.2f}", _pnl(entry, reward), None
         if (not is_buy) and low <= day_pdl and day_pdl < entry:
-            reward = min(entry - day_pdl, 5.0 * risk)
+            reward = min(entry - day_pdl, TARGET_RR * risk)
             return f"Next_Day_PDL_Break_Exit_1:{reward / risk:.2f}", _pnl(entry, reward), None
 
     # 4) Profit lock / target
     reward = (high - entry) if is_buy else (entry - low)
     rr = reward / risk if risk > 0 else 0.0
 
-    if rr >= 5.0:
-        return "Target_1:5_Reached_Full_Exit", _pnl(entry, 5.0 * risk), None
+    if rr >= TARGET_RR:
+        return f"Target_1:{TARGET_RR:g}_Reached_Full_Exit", _pnl(entry, TARGET_RR * risk), None
 
-    new_lock = 4.0 if rr >= 4.0 else (3.0 if rr >= 3.0 else (2.0 if rr >= 2.0 else 0.0))
+    new_lock = max([l for l in LOCK_LEVELS if rr >= l], default=0.0)
     if new_lock > trade['locked_rr']:
         lock_px = entry + new_lock * risk if is_buy else entry - new_lock * risk
         close_px = float(candle['Close'])
@@ -415,7 +434,7 @@ STATE_SEED_FILE = os.path.join(ROOT, "rd_trading_state.json")   # first run of a
 PAPER_TELEGRAM = os.getenv("PAPER_TELEGRAM", "YES").strip().upper() != "NO"
 
 ENTRY_STATUSES = {"Valid_Bullish_Breakout_BUY", "Valid_Bearish_Breakout_SELL"}
-EXIT_PREFIXES = ("Stop_Loss_Hit", "SL_Hit_Exit_Locked", "Target_1:5", "Next_Day_PDH", "Next_Day_PDL")
+EXIT_PREFIXES = ("Stop_Loss_Hit", "SL_Hit_Exit_Locked", "Target_1:", "Next_Day_PDH", "Next_Day_PDL")
 LOCK_PREFIXES = ("Profit_Locked_at",)
 
 
