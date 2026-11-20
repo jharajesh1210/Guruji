@@ -1075,22 +1075,10 @@
     "B-ENA_USDT|2026-11-20 18:45:00|Profit_Locked_at_1:2",
     "B-ENA_USDT|2026-11-20 19:00:00|SL_Hit_Exit_Locked_1:2",
     "B-ADA_USDT|2026-11-20 19:00:00|SL_Hit_Exit_Locked_1:2",
-    "B-ARIA_USDT|2026-11-20 19:15:00|SL_Hit_Exit_Locked_1:2"
+    "B-ARIA_USDT|2026-11-20 19:15:00|SL_Hit_Exit_Locked_1:2",
+    "B-ETH_USDT|2026-11-20 19:30:00|Stop_Loss_Hit_MACD_Confirmed"
   ],
   "trades": {
-    "B-ETH_USDT": {
-      "direction": "SELL",
-      "entry_price": 1732.95,
-      "sl": 1749.79,
-      "risk": 16.839999999999918,
-      "locked_rr": 0.0,
-      "pending_sl": null,
-      "pending_rr": 0.0,
-      "carried_over": false,
-      "entry_ts": "2026-11-20 17:30:00",
-      "entry_date": "2026-11-20",
-      "entry_session": "London"
-    },
     "B-AERO_USDT": {
       "direction": "SELL",
       "entry_price": 0.4112,
@@ -1107,7 +1095,7 @@
   },
   "last_ts": {
     "B-BTC_USDT": "2026-11-20 19:30:00",
-    "B-ETH_USDT": "2026-11-20 19:15:00",
+    "B-ETH_USDT": "2026-11-20 19:30:00",
     "B-SOL_USDT": "2026-11-20 19:30:00",
     "B-ZEC_USDT": "2026-11-20 19:30:00",
     "B-AKE_USDT": "2026-11-20 19:30:00",
@@ -1119,7 +1107,7 @@
     "B-SHELL_USDT": "2026-11-19 18:00:00",
     "B-NEAR_USDT": "2026-11-20 19:30:00",
     "B-1000PEPE_USDT": "2026-11-20 19:30:00",
-    "B-XAG_USDT": "2026-11-20 19:15:00",
+    "B-XAG_USDT": "2026-11-20 19:30:00",
     "B-CL_USDT": "2026-11-20 19:30:00",
     "B-SOPH_USDT": "2026-11-20 19:30:00",
     "B-UNI_USDT": "2026-11-20 19:30:00",
