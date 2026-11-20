@@ -179,11 +179,11 @@ def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock
                 exit_px, why = emerg, "emergency_7pct"
                 break
             best = sgn * ((mm.high if buy else mm.low) - E) / R
-            if best >= 5.0:      # watcher sees 1:5 -> market exit at about the minute close
-                exit_px, why = mm.close, "target_1:5"
+            if best >= getattr(rd, "TARGET_RR", 5.0):      # watcher sees target -> market exit at about the minute close
+                exit_px, why = mm.close, "target"
                 break
             if mode == "FAST":
-                L = 4.0 if best >= 4 else (3.0 if best >= 3 else (2.0 if best >= 2 else 0.0))
+                L = max([l for l in getattr(rd, "LOCK_LEVELS", (2.0, 3.0, 4.0)) if best >= l], default=0.0)
                 if L > locked:
                     lvl = 0.0 if (be and L == 2.0) else L - lock_lag
                     locked, stop = L, E + sgn * lvl * R
@@ -204,14 +204,14 @@ def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock
                     break
         if str(c["Date"]) != str(entry_date) and pdh is not None and pdh == pdh:
             if buy and hi >= pdh and pdh > E:
-                exit_px, why = min(pdh, E + 5 * R), "next_day_pdh"
+                exit_px, why = min(pdh, E + getattr(rd, "TARGET_RR", 5.0) * R), "next_day_pdh"
                 break
             if (not buy) and lo <= pdl and pdl < E:
-                exit_px, why = max(pdl, E - 5 * R), "next_day_pdl"
+                exit_px, why = max(pdl, E - getattr(rd, "TARGET_RR", 5.0) * R), "next_day_pdl"
                 break
         if mode == "CANDLE":
             best = sgn * ((hi if buy else lo) - E) / R
-            L = 4.0 if best >= 4 else (3.0 if best >= 3 else (2.0 if best >= 2 else 0.0))
+            L = max([l for l in getattr(rd, "LOCK_LEVELS", (2.0, 3.0, 4.0)) if best >= l], default=0.0)
             if L > locked:
                 lvl = 0.0 if (be and L == 2.0) else L - lock_lag
                 locked, stop = L, E + sgn * lvl * R
