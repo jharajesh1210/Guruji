@@ -130,7 +130,8 @@ def load_1m(tr):
 from collections import namedtuple
 Min = namedtuple("Min", "ts open high low close")
 
-def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock_lag=0.0, be=False):
+def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock_lag=0.0, be=False,
+             cap_r=None, cap_pct=None):
     """Returns dict(result) or None if skipped by the guard."""
     buy = tr["dir"] == "BUY"
     E, R, SL = tr["E"], tr["R"], tr["SL"]
@@ -167,6 +168,13 @@ def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock
                 exit_px = min(stop, mm.open) if buy else max(stop, mm.open)
                 why = f"lock_stop_1:{locked:g}"
                 break
+            if locked == 0 and (cap_r is not None or cap_pct is not None):
+                dist = min(cap_r * R if cap_r is not None else 1e18, cap_pct * E if cap_pct is not None else 1e18)
+                lvl = E - sgn * dist
+                if (buy and mm.low <= lvl) or ((not buy) and mm.high >= lvl):
+                    exit_px = min(lvl, mm.open) if buy else max(lvl, mm.open)
+                    why = "hard_cap"
+                    break
             if locked == 0 and ((buy and mm.low <= emerg) or ((not buy) and mm.high >= emerg)):
                 exit_px, why = emerg, "emergency_7pct"
                 break

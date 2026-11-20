@@ -51,6 +51,8 @@ def blocked(row, d, pdh, pdl):
         return not (atr == atr and beyond <= atr)
     if m == "NEAR_0.5%":
         return beyond > row["Close"] * 0.005
+    if m == "NEAR_1.0%":
+        return beyond > row["Close"] * 0.010
     if m == "RUN<=2":
         return run > 2
     if m == "FRESH+RUN":
