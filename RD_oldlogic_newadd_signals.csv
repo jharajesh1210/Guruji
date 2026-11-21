@@ -3,3 +3,5 @@ RD_oldlogic_newadd.py,B-HBAR_USDT,ENTRY,2026-11-21 15:30:00,London,0.04934,0.054
 RD_oldlogic_newadd.py,B-DOS_USDT,ENTRY,2026-11-21 15:30:00,London,0.1468,0.2041,0.1475,0.1468,0.149736,Valid_Bearish_Breakout_SELL,0.0,22941167
 RD_oldlogic_newadd.py,B-HBAR_USDT,EXIT,2026-11-21 16:30:00,London,0.0499,0.05449,0.05,,,Stop_Loss_Hit_MACD_Confirmed,-34.05,49011075
 RD_oldlogic_newadd.py,B-MON_USDT,ENTRY,2026-11-21 17:00:00,London,0.01254,0.01442,0.01258,0.01254,0.01266,Valid_Bearish_Breakout_SELL,0.0,15060790
+RD_oldlogic_newadd.py,B-DOS_USDT,EXIT,2026-11-21 17:30:00,London,0.1492,0.2041,0.169,,,Stop_Loss_Hit_Loss_Cap_1.50R,-90.0,21003983
+RD_oldlogic_newadd.py,B-SIREN_USDT,ENTRY,2026-11-21 17:30:00,London,0.02666,0.02659,0.02331,0.02666,0.02637,Valid_Bullish_Breakout_BUY,0.0,10343003
