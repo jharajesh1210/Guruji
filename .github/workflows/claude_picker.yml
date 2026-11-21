@@ -1,0 +1,23 @@
+# claude_picker.py: "abhi kis coin mein entry?" decision table (no orders). Run manually from the Actions tab.
+name: claude_picker (entry decision, no orders)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TG_TOKEN: ${{ secrets.TG_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install requests numpy pandas
+      - name: Decision table (also sent to Telegram if there is an ENTRY)
+        run: python -u claude_picker.py --tg
