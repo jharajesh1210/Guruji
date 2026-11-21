@@ -32,6 +32,12 @@ CAP_R, CAP_PCT = 1.5, 0.03
 LOCKS, TARGET = (2.0, 3.0, 4.0, 5.0), 6.0
 MAX_HOLD_MIN = 3 * 24 * 60
 MINSLS = [0.0075, 0.003]   # current 0.75%, and 0.3% (small candles have small SL)
+ORIGINAL = os.getenv("BT_ORIGINAL", "0") == "1"
+if ORIGINAL:   # mother strategy v1: no distance limit, min SL 0.3%, no loss cap (MACD wait only), lock 1:2-1:4, exit 1:5
+    MAX_DIST = 1e9
+    MINSLS = [0.003]
+    CAP_R, CAP_PCT = None, None
+    LOCKS, TARGET = (2.0, 3.0, 4.0), 5.0
 
 
 def fetch_1m(pair):
@@ -129,7 +135,7 @@ def simulate_pair(m1, MIN_SL=MIN_SL):
             if R > E * MAX_SL:
                 R = E * MAX_SL
                 sl = E - d * R
-            cap = E - d * min(CAP_R * R, CAP_PCT * E)
+            cap = E - d * min(CAP_R * R, CAP_PCT * E) if CAP_R is not None else None
             locked, stop = 0.0, None
             ex = why = None
             i = j
@@ -137,7 +143,7 @@ def simulate_pair(m1, MIN_SL=MIN_SL):
                 if stop is not None and ((L[i] <= stop) if d == 1 else (H[i] >= stop)):
                     ex, why = (min(stop, O[i]) if d == 1 else max(stop, O[i])), "lock"
                     break
-                if locked == 0 and ((L[i] <= cap) if d == 1 else (H[i] >= cap)):
+                if cap is not None and locked == 0 and ((L[i] <= cap) if d == 1 else (H[i] >= cap)):
                     ex, why = (min(cap, O[i]) if d == 1 else max(cap, O[i])), "loss_cap"
                     break
                 best = d * ((H[i] if d == 1 else L[i]) - E) / R
@@ -187,7 +193,7 @@ def main():
                     print(pair, e, flush=True)
             if k % 10 == 0:
                 print(f"  {k}/{len(pairs)} coins done", flush=True)
-    lines = [f"Entry timeframe test (v2 rules), {used} coins, 1m data {span}, 25 USDT/trade, fees 0.118%, one trade per coin.", "",
+    lines = [f"Entry timeframe test ({'ORIGINAL mother rules' if ORIGINAL else 'v2 rules'}), {used} coins, 1m data {span}, 25 USDT/trade, fees 0.118%, one trade per coin.", "",
              "| Entry candle | Min SL | Trades | Win % | Net R | Net USDT @25 | PF | Max DD | 1st half | 2nd half | exits |",
              "|---|---|---|---|---|---|---|---|---|---|---|"]
     for ms in MINSLS:
@@ -201,7 +207,7 @@ def main():
         cum = x.usdt.cumsum()
         h = len(x) // 2
         ex = ", ".join(f"{k}: {v}" for k, v in x["exit"].value_counts().items())
-        lines.append(f"| {tf}m{' (now)' if (tf == 15 and ms == 0.0075) else ''} | {ms*100:.2f}% | {len(x)} | {100 * len(w) / len(x):.1f} | {x.R.sum():.1f} | "
+        lines.append(f"| {tf}m{' (now)' if (tf == 15 and (ms == 0.0075 or ORIGINAL)) else ''} | {ms*100:.2f}% | {len(x)} | {100 * len(w) / len(x):.1f} | {x.R.sum():.1f} | "
                      f"{x.usdt.sum():.2f} | {w.sum() / -l.sum() if len(l) else 99:.2f} | {(cum - cum.cummax()).min():.2f} | "
                      f"{x.usdt.iloc[:h].sum():.2f} | {x.usdt.iloc[h:].sum():.2f} | {ex} |")
     text = "\n".join(lines) + "\n"
