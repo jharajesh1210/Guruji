@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "symbol": "B-BARD_USDT",
+    "direction": "LONG",
+    "entry": 0.0961,
+    "initial_sl": 0.092788,
+    "current_sl": 0.092788,
+    "risk": 0.003312,
+    "locked_rr": 0,
+    "last_processed_open_time": 1795279500000,
+    "session": "NEW YORK",
+    "level_name": "London High / Low",
+    "ref_level": 0.0946,
+    "entry_candle_utc": "2026-11-21 16:45"
+  }
+]
