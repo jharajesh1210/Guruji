@@ -25,9 +25,9 @@ LEVERAGE = float(os.getenv("LEVERAGE", "30"))
 POSITION_USDT = CAPITAL_USDT * LEVERAGE                      
 MAX_LOSS_USDT = float(os.getenv("MAX_LOSS_USDT", "100"))     
 MAX_RISK_PCT = float(os.getenv("MAX_RISK_PCT", "2.0"))       
-MIN_RISK_PCT = float(os.getenv("MIN_RISK_PCT", "0.75"))  # 0.15 -> 0.3 -> 0.75 (20 Nov, 90-day live-style backtest)
+MIN_RISK_PCT = float(os.getenv("MIN_RISK_PCT", "0.3"))   # back to ORIGINAL entry rule (mother v1) on 21 Nov (was 0.75 on 20 Nov)
 # 20 Nov 2026 (90-day live-style backtest, rd_backtest_cap.md: -79 -> -18 USDT, max DD -119 -> -42):
-MAX_ENTRY_DIST_PCT = float(os.getenv("MAX_ENTRY_DIST_PCT", "0.5"))  # close at most 0.5% beyond PDH/PDL, else skip
+MAX_ENTRY_DIST_PCT = float(os.getenv("MAX_ENTRY_DIST_PCT", "0"))  # 0 = no limit (ORIGINAL entry rule, 21 Nov); 0.5 = max 0.5% beyond PDH/PDL
 LOSS_CAP_R = float(os.getenv("LOSS_CAP_R", "1.5"))       # no profit locked: exit at once at SL + 0.5R (=1.5R) ...
 LOSS_CAP_PCT = float(os.getenv("LOSS_CAP_PCT", "3.0"))   # ... or 3% of price, whichever is nearer
 LOCK_LEVELS = (2.0, 3.0, 4.0, 5.0)                       # lock ladder 1:2 / 1:3 / 1:4 / 1:5
