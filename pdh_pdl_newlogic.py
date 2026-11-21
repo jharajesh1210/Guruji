@@ -23,7 +23,7 @@ from datetime import datetime, timezone, timedelta
 # ==============================================================================
 TIMEFRAME = "15m"                  # 15-minute candles
 CANDLE_LIMIT = 300                 # ~3+ days of 15m data (PDH/PDL & 100-median ke liye safe)
-MIN_24H_VOLUME_USDT = 100_000_000  # Stage 1: Minimum $100M 24h volume
+MIN_24H_VOLUME_USDT = 50_000_000   # Stage 1: Minimum $50M 24h volume (user, 21 Nov: was $100M)
 MIN_ATR_PCT = 0.002                # Stage 1: Minimum 0.2% ATR (dead coins filter)
 MAX_ASIA_RANGE_PCT = 0.035         # London mein Asia range max 3.5% tak tight honi chahiye
 
@@ -607,7 +607,7 @@ def run_scanner():
 
     # Stage 1: Liquid USDT Futures Coins Selection
     coins_map = get_liquid_usdt_futures_pairs()
-    print(f"Stage 1 Passed: {len(coins_map)} Futures coins with 24h Volume >= $100M")
+    print(f"Stage 1 Passed: {len(coins_map)} Futures coins with 24h Volume >= ${MIN_24H_VOLUME_USDT/1e6:.0f}M")
 
     active_trades = load_active_trades()
     open_symbols = {t["symbol"] for t in active_trades}
