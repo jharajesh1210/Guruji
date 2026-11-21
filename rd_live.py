@@ -54,10 +54,13 @@ EMERGENCY_MAX_PCT = float(os.getenv("EMERGENCY_MAX_PCT", "2.5"))
 ENTRY_MAX_AGE_BARS = int(os.getenv("ENTRY_MAX_AGE_BARS", "2"))   # only act on entries from the newest N candles
 # Entry chase guard: paper enters at the breakout candle close. If the live price has already run more than
 # ENTRY_MAX_SLIP_R (0.75, backtested 30 days: better than 0.3) x risk past that close (against us), skip - a late, worse fill makes the 1:2 lock unreachable.
-ENTRY_MAX_SLIP_R = float(os.getenv("ENTRY_MAX_SLIP_R", "0.75"))
+ENTRY_MAX_SLIP_R = float(os.getenv("ENTRY_MAX_SLIP_R", "999"))   # 21 Nov: OFF (live = exactly rd_trading.py); was 0.75
 # Profit lock on the exchange: when paper locks 1:2 / 1:3 / 1:4, move the exchange stop to that locked level
 # (instead of only the far emergency stop) so the locked profit is protected between bot cycles.
 LOCK_ON_EXCHANGE = os.getenv("LOCK_ON_EXCHANGE", "YES").strip().upper() == "YES"
+# 21 Nov: minute-by-minute fast lock OFF -> locks / 1:6 exit happen exactly when rd_trading.py decides them
+# (15m candle close). Set FAST_LOCK=YES in /etc/rd_live.env to turn the 1-minute watcher back on.
+FAST_LOCK = os.getenv("FAST_LOCK", "NO").strip().upper() == "YES"
 # Live = copy of paper: a live entry is taken only if the paper scanner (GitHub) took the same trade
 # (same pair, same entry candle, same direction). Paper state is read from GitHub every scan.
 MIRROR_PAPER = os.getenv("MIRROR_PAPER", "YES").strip().upper() == "YES"
@@ -591,6 +594,8 @@ def recent_extremes(pair, seconds=180):
 def watch_locks(cli=None):
     """Between 15m candles: as soon as price touches 1:2 / 1:3 / 1:4 the lock is applied at once
     (bot SL + exchange stop); at 1:5 the trade is closed. Does not open any trade."""
+    if not FAST_LOCK:
+        return
     cli = cli or Client(API_KEY, API_SECRET)
     st = load_state()
     trades = st["trades"]
