@@ -69,6 +69,9 @@ PAPER_STATE_URLS = (
     "https://raw.githubusercontent.com/jharajesh1210/Guruji/main/rd_trading_state.json",
 )
 LIQ_SAFETY = 0.8   # emergency stop must be inside 80% of the (1/leverage) liquidation distance
+# Coins whose max leverage makes MARGIN x lev smaller than CoinDCX min_notional (e.g. 1 USDT x 5x = 5 < 6):
+# raise the margin only as much as needed, never above this (21 Nov). 0 = skip such coins.
+MAX_TOPUP_MARGIN_USDT = float(os.getenv("MAX_TOPUP_MARGIN_USDT", "2.0"))
 
 API_KEY = os.getenv("COINDCX_API_KEY", "")
 API_SECRET = os.getenv("COINDCX_API_SECRET", "")
@@ -258,6 +261,24 @@ def emergency_dist(price, risk, sl):
     return max(far, abs(price - sl) * 1.02) if sl else far
 
 
+def loss_cap_dist(side, price, risk, sl):
+    """Distance from price to the loss-cap stop (1.5R or 3% from the paper entry, whichever is nearer) - the
+    stop that is really placed on the exchange. None if it cannot be computed or is already behind price."""
+    if not (sl and risk and (rd.LOSS_CAP_R > 0 or rd.LOSS_CAP_PCT > 0)):
+        return None
+    e_paper = sl + risk if side == "buy" else sl - risk
+    cap = min(rd.LOSS_CAP_R * risk if rd.LOSS_CAP_R > 0 else 1e18,
+              e_paper * rd.LOSS_CAP_PCT / 100 if rd.LOSS_CAP_PCT > 0 else 1e18)
+    cap_px = e_paper - cap if side == "buy" else e_paper + cap
+    d = (price - cap_px) if side == "buy" else (cap_px - price)
+    return d if d > 0 else None
+
+
+def round_up(x, inc):
+    q = Decimal(str(inc))
+    return float((Decimal(str(x)) / q).to_integral_value(rounding="ROUND_CEILING") * q)
+
+
 def plan_order(side, price, risk, inst, lev_wanted, sl=None):
     """Quantity, leverage and emergency-stop price. Returns (plan | None, reason)."""
     ml = inst.get("max_leverage_long" if side == "buy" else "max_leverage_short")
@@ -271,11 +292,19 @@ def plan_order(side, price, risk, inst, lev_wanted, sl=None):
     min_qty = float(inst.get("min_quantity") or 0)
     min_notional = float(inst.get("min_notional") or 0)
     qty = round_down(MARGIN_USDT * lev / price, qty_inc)
+    if (qty * price < min_notional or qty < min_qty) and MAX_TOPUP_MARGIN_USDT > 0:
+        need = max(min_notional * 1.02 / price, min_qty)
+        q2 = round_up(need, qty_inc)
+        if q2 * price / lev <= MAX_TOPUP_MARGIN_USDT:
+            qty = q2
     if qty < min_qty or qty <= 0:
         return None, f"quantity {qty} below min_quantity {min_qty}"
     if qty * price < min_notional:
-        return None, f"notional {qty * price:.2f} below min_notional {min_notional}"
+        return None, f"notional {qty * price:.2f} below min_notional {min_notional} (needs > {MAX_TOPUP_MARGIN_USDT} USDT margin)"
     dist = emergency_dist(price, risk, sl)
+    cd = loss_cap_dist(side, price, risk, sl)     # the stop really placed on the exchange is the loss cap
+    if cd is not None:
+        dist = min(dist, cd)
     if dist / price * 100 > LIQ_SAFETY * 100.0 / lev:
         return None, f"emergency stop {dist / price * 100:.2f}% too close to liquidation at {lev:g}x"
     stop = price - dist if side == "buy" else price + dist
