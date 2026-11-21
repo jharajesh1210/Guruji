@@ -3,13 +3,12 @@ RD_oldlogic_newadd.py - PAPER ONLY test (no live orders, no Telegram by default)
 
 = rd_trading.py (current old logic, imported unchanged: v2 rules + BB squeeze, loss cap 1.5R/3%,
   MACD loss exit, locks 1:2..1:5, full exit 1:6, profit block)
-+ 2 additions:
-  1. London skip : no NEW entry in the London session (13:30-18:30 IST). Running trades are managed normally.
-  2. Partial 1:1 : when price reaches 1R, book 50% at 1R and move the stop of the other 50% to entry
++ 1 addition (21 Nov 11:35 IST update: London session ON again, partial moved 1R -> 1.25R):
+  Partial 1:1.25 : when price reaches 1.25R, book 50% at 1.25R and move the stop of the other 50% to entry
                    (breakeven). If the rest later hits 1:2+ the normal lock ladder takes over.
-     P&L = 50% x (1R) + 50% x (final exit of the rest).
+     P&L = 50% x (1.25R) + 50% x (final exit of the rest).
 Own state/signals files, so the main paper and live are never touched.
-90-day live-style backtest: win 57.4%, +1.2 USDT @10/trade, max DD -4.0 (current: 38.8%, +0.3, -8.4).
+90-day live-style backtest: win 51.1%, +1.7 USDT @10/trade, max DD -5.3 (current: 38.8%, +0.4, -8.3).
 """
 import os
 import sys
@@ -23,8 +22,8 @@ import rd_trading as rd  # noqa: E402
 rd.SCRIPT_NAME = "RD_oldlogic_newadd.py"
 rd.STATE_SEED_FILE = os.path.join(HERE, "__no_seed__.json")    # start fresh, never copy the main paper
 
-PARTIAL_R = 1.0
-SKIP_SESSIONS = ("London",)
+PARTIAL_R = 1.25
+SKIP_SESSIONS = ()          # London skip removed (all sessions trade)
 
 _manage, _step = rd.manage_open_trade, rd.step_candle
 

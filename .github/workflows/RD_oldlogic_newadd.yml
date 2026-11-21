@@ -27,8 +27,8 @@ jobs:
       CHAT_ID: ${{ secrets.CHAT_ID }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MIN_24H_VOLUME_USDT: "10000000"
-      # PAPER test only (London skip + 50% book at 1:1). No Telegram, no live orders.
-      PAPER_TELEGRAM: "NO"
+      # PAPER test only (London skip + 50% book at 1:1). Telegram alerts ON, no live orders.
+      PAPER_TELEGRAM: "YES"
 
     steps:
       - name: Checkout repository
