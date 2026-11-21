@@ -31,7 +31,11 @@ MAX_ENTRY_DIST_PCT = float(os.getenv("MAX_ENTRY_DIST_PCT", "0.5"))  # close at m
 LOSS_CAP_R = float(os.getenv("LOSS_CAP_R", "1.5"))       # no profit locked: exit at once at SL + 0.5R (=1.5R) ...
 LOSS_CAP_PCT = float(os.getenv("LOSS_CAP_PCT", "3.0"))   # ... or 3% of price, whichever is nearer
 LOCK_LEVELS = (2.0, 3.0, 4.0, 5.0)                       # lock ladder 1:2 / 1:3 / 1:4 / 1:5
-TARGET_RR = float(os.getenv("TARGET_RR", "6.0"))         # full exit at 1:6 (was 1:5)      
+TARGET_RR = float(os.getenv("TARGET_RR", "6.0"))         # full exit at 1:6 (was 1:5)
+# 21 Nov 2026 (90-day live-style backtest rd_backtest_bb.md: -7.6 -> +0.6 USDT, max DD -16.7 -> -8.4):
+# take the PDH/PDL breakout only after a Bollinger squeeze = BB(20,2) width on the candle BEFORE the breakout
+# is below the median width of the previous 100 candles (fresh breakout, not an already-stretched move).
+BB_SQUEEZE_FILTER = os.getenv("BB_SQUEEZE_FILTER", "YES").strip().upper() == "YES"      
 SL_MODE = os.getenv("SL_MODE", "candle").lower()             
 RISK_CAP_PCT = min(MAX_RISK_PCT, MAX_LOSS_USDT / POSITION_USDT * 100)
 
@@ -79,6 +83,12 @@ def prepare(df):
     df['Prev_MACD'] = df['MACD'].shift(1)
     df['Prev_Signal'] = df['MACD_Signal'].shift(1)
     # ------------------------------
+    # --- Bollinger squeeze (20, 2) ---
+    bb_mid = df['Close'].rolling(20).mean()
+    bb_sd = df['Close'].rolling(20).std(ddof=0)
+    bb_width = (4 * bb_sd) / bb_mid
+    prev_w = bb_width.shift(1)
+    df['BB_Squeeze'] = prev_w < prev_w.rolling(100, min_periods=50).median()
 
     daily = df.groupby('Date').agg(DH=('High', 'max'), DL=('Low', 'min'), N=('High', 'size'))
     daily = daily[daily['N'] >= MIN_DAY_BARS]  
@@ -141,6 +151,8 @@ def detect_signal(row, pdh, pdl):
         beyond = (entry - pdh) if direction == "BUY" else (pdl - entry)
         if MAX_ENTRY_DIST_PCT > 0 and beyond > entry * MAX_ENTRY_DIST_PCT / 100:
             return "Skipped_Late_Entry_Too_Far_From_Level", None
+        if BB_SQUEEZE_FILTER and not bool(row.get('BB_Squeeze', False)):
+            return "Skipped_No_BB_Squeeze", None
         trade = {
             'direction': direction,
             'entry_price': entry,
