@@ -1,0 +1,76 @@
+# gold_bpro2_paper.py: PAPER trading of gold strategy B-Pro 2 on CoinDCX B-XAU_USDT (Telegram ON).
+# Scans once per closed 15m candle (40 s after :00/:15/:30/:45). Runner lives ~5.5 h, then re-dispatches itself.
+name: gold_bpro2 (GOLD PAPER, Telegram)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "25 */3 * * *"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: gold-bpro2
+  cancel-in-progress: false
+
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      TG_TOKEN: ${{ secrets.TG_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GOLD_TELEGRAM: "YES"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install requests numpy pandas
+      - name: Compile
+        run: python -m py_compile gold_bpro2_paper.py rd_backtest_stops.py rd_trading.py
+      - name: Scan every closed 15m candle
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          persist() {
+            for f in gold_bpro2_state.json gold_bpro2_trades.csv; do
+              if [ -f "$f" ]; then git add "$f"; fi
+            done
+            if git diff --cached --quiet; then
+              git pull --rebase --autostash origin main >/dev/null 2>&1 || true
+              return 0
+            fi
+            git commit -m "Update gold_bpro2 paper state" || return 0
+            for attempt in 1 2 3; do
+              git pull --rebase --autostash origin main >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then return 0; fi
+              sleep $((attempt * 3))
+            done
+            echo "WARN: could not push state this cycle"
+            return 0
+          }
+          END=$(( $(date +%s) + 19800 ))
+          cycle=0
+          while [ "$(date +%s)" -lt "$END" ]; do
+            NOW=$(date +%s)
+            NEXT=$(( (NOW / 900 + 1) * 900 + 40 ))
+            if [ "$cycle" -gt 0 ] || [ $(( NOW % 900 )) -gt 300 ]; then
+              sleep $((NEXT - NOW))
+            fi
+            cycle=$((cycle + 1))
+            echo "=== gold_bpro2 cycle ${cycle} @ $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+            timeout 600 python -u gold_bpro2_paper.py || echo "WARN: cycle ${cycle} failed"
+            persist
+          done
+      - name: Re-dispatch next run
+        if: success() || failure()
+        run: gh workflow run gold_bpro2.yml --repo "${{ github.repository }}" --ref main
