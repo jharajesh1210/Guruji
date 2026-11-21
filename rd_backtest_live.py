@@ -131,8 +131,10 @@ from collections import namedtuple
 Min = namedtuple("Min", "ts open high low close")
 
 def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock_lag=0.0, be=False,
-             cap_r=None, cap_pct=None):
-    """Returns dict(result) or None if skipped by the guard."""
+             cap_r=None, cap_pct=None, be_r=None, partial_r=None):
+    """Returns dict(result) or None if skipped by the guard.
+    be_r: when price reaches be_r x R (no lock yet) move the stop to entry.
+    partial_r: book 50% at partial_r x R and move the stop of the rest to entry."""
     buy = tr["dir"] == "BUY"
     E, R, SL = tr["E"], tr["R"], tr["SL"]
     sgn = 1 if buy else -1
@@ -143,6 +145,7 @@ def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock
     if past_sl or (guard is not None and slip > guard):
         return None
     locked, stop = 0, None
+    part_px, be_done = None, False
     emerg = fill * (1 - EMERG) if buy else fill * (1 + EMERG)
     exit_px, why = None, None
     entry_date = tr["date"]
@@ -179,6 +182,13 @@ def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock
                 exit_px, why = emerg, "emergency_7pct"
                 break
             best = sgn * ((mm.high if buy else mm.low) - E) / R
+            if partial_r is not None and part_px is None and best >= partial_r:
+                part_px = E + sgn * partial_r * R
+                if stop is None or (buy and stop < E) or ((not buy) and stop > E):
+                    stop = E
+                be_done = True
+            if be_r is not None and not be_done and locked == 0 and best >= be_r:
+                stop, be_done = E, True
             if best >= getattr(rd, "TARGET_RR", 5.0):      # watcher sees target -> market exit at about the minute close
                 exit_px, why = mm.close, "target"
                 break
@@ -195,7 +205,7 @@ def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock
         # ---- 15m candle close
         pdh, pdl = rd.levels_for(c["Date"], daily)
         hi, lo, cl = float(c["High"]), float(c["Low"]), float(c["Close"])
-        if locked == 0:
+        if locked == 0 and not be_done:
             sl_hit = (buy and lo <= SL) or ((not buy) and hi >= SL)
             if sl_hit:
                 macd, sig = float(c.get("MACD", 0)), float(c.get("MACD_Signal", 0))
@@ -223,9 +233,14 @@ def sim_live(tr, recs, daily, m1, mode, guard, ideal_fill=False, fees=True, lock
             break
     if exit_px is None:
         exit_px, why = float(recs[min(ri, len(recs) - 1)]["Close"]), "open_at_end"
-    gross_r = sgn * (exit_px - fill) / R
+    if part_px is not None:
+        gross_r = 0.5 * sgn * (part_px - fill) / R + 0.5 * sgn * (exit_px - fill) / R
+        gross_pct = 0.5 * sgn * (part_px - fill) / fill + 0.5 * sgn * (exit_px - fill) / fill
+    else:
+        gross_r = sgn * (exit_px - fill) / R
+        gross_pct = sgn * (exit_px - fill) / fill
     fee_r = FEE_RT * fill / R if fees else 0.0
-    usdt = LIVE_NOTIONAL * sgn * (exit_px - fill) / fill - (LIVE_NOTIONAL * FEE_RT if fees else 0.0)
+    usdt = LIVE_NOTIONAL * gross_pct - (LIVE_NOTIONAL * FEE_RT if fees else 0.0)
     return {"pair": tr["pair"], "entry_ts": tr["entry_ts"], "dir": tr["dir"], "slip_r": round(slip, 3),
             "exit": why, "R": gross_r - fee_r, "usdt": usdt, "fee_r": fee_r}
 
