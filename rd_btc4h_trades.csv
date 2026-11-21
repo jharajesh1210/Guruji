@@ -1,2 +1,3 @@
 Pair,Kind,Bar_IST,Session,Direction,Entry,SL,Price,Status,R,PnL_USDT_20
 B-BTC_USDT,ENTRY,2026-11-20 17:30:00,London,SELL,59445.1,60593.62,,Breakout_PDL,,
+B-BTC_USDT,LOCK,2026-11-21 05:30:00,Asian,SELL,59445.1,57148.05714285714,,Profit_Locked_1:2,,
