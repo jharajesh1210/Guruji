@@ -1,0 +1,3 @@
+Script,Pair,Kind,Timestamp,Session,Close,PDH,PDL,Entry,SL,Status,Locked_PnL_USDT,Volume_24h_USDT
+RD_oldlogic_newadd.py,B-HBAR_USDT,ENTRY,2026-11-21 15:30:00,London,0.04934,0.05449,0.04938,0.04934,0.04986,Valid_Bearish_Breakout_SELL,0.0,48723193
+RD_oldlogic_newadd.py,B-DOS_USDT,ENTRY,2026-11-21 15:30:00,London,0.1468,0.2041,0.1475,0.1468,0.149736,Valid_Bearish_Breakout_SELL,0.0,22941167
